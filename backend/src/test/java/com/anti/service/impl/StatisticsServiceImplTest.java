@@ -15,6 +15,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -85,6 +86,34 @@ class StatisticsServiceImplTest {
 
         verify(departmentStatisticsMapper, times(1)).selectByStatDate(any());
         verify(departmentStatisticsMapper, times(2)).insert(any());
+    }
+
+    @Test
+    void getCompletionRateNormalizesNullsAndNumericScale() {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("grade", "2026级");
+        row.put("major", null);
+        row.put("completed_users", 3L);
+        row.put("total_users", 7L);
+        row.put("completion_rate", new BigDecimal("42.857"));
+        when(statisticsQueryMapper.selectCompletionRate()).thenReturn(Arrays.asList(null, row));
+
+        List<Map<String, Object>> result = service.getCompletionRate();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0))
+                .containsEntry("grade", "2026级")
+                .containsEntry("major", "")
+                .containsEntry("completed_users", 3)
+                .containsEntry("total_users", 7)
+                .containsEntry("completion_rate", new BigDecimal("42.9"));
+    }
+
+    @Test
+    void getCompletionRateReturnsEmptyListWhenMapperReturnsNull() {
+        when(statisticsQueryMapper.selectCompletionRate()).thenReturn(null);
+
+        assertThat(service.getCompletionRate()).isEmpty();
     }
 
     private Map<String, Object> departmentRow(String grade, String major, int userCount) {

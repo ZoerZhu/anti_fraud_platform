@@ -7,6 +7,7 @@ import com.anti.entity.News;
 import com.anti.entity.RecommendationLog;
 import com.anti.entity.UserBehaviorMatrix;
 import com.anti.entity.UserProfile;
+import com.anti.entity.vo.UserInterestVO;
 import com.anti.mapper.AssociationRuleMapper;
 import com.anti.mapper.CaseBrowseLogMapper;
 import com.anti.mapper.CaseTagMapper;
@@ -32,6 +33,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -69,6 +71,16 @@ class RecommendationServiceImplTest {
 
     @InjectMocks
     private RecommendationServiceImpl service;
+
+    @Test
+    void getRecommendationsRejectsMissingUserBeforeProfileLookup() {
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.getRecommendations(null, 10, null));
+
+        assertThat(exception.getCode()).isEqualTo(401);
+        assertThat(exception.getMessage()).contains("请先登录");
+        verifyNoInteractions(userProfileMapper, newsMapper, fraudCaseMapper, challengeMapper);
+    }
 
     @Test
     void recordRecommendationClickRejectsUnknownItemTypeBeforePersistence() {
@@ -112,6 +124,21 @@ class RecommendationServiceImplTest {
     }
 
     @Test
+    void recommendationExposureWriteFailureDoesNotBreakColdStartRecommendations() {
+        when(userProfileMapper.selectByUserId(1L)).thenReturn(null);
+        when(newsMapper.selectRequiredNews(1)).thenReturn(List.of(mandatoryNews()));
+        when(fraudCaseMapper.selectList(any())).thenReturn(List.of(), List.of(hotCase()));
+        when(challengeMapper.selectList(any())).thenReturn(List.of(basicChallenge()), List.of());
+        when(recommendationLogMapper.insert(any(RecommendationLog.class))).thenThrow(new RuntimeException("log-secret"));
+
+        List<com.anti.entity.vo.RecommendationVO> result = service.getRecommendations(1L, 3, null);
+
+        assertThat(result).hasSize(3);
+        assertThat(result).extracting(com.anti.entity.vo.RecommendationVO::getItemType)
+                .contains("news", "case", "challenge");
+    }
+
+    @Test
     void recordRecommendationClickCreatesFallbackLogAndUpdatesCaseTagBehavior() {
         when(fraudCaseMapper.selectById(10L)).thenReturn(hotCase());
         when(recommendationLogMapper.selectOne(any())).thenReturn(null);
@@ -137,6 +164,39 @@ class RecommendationServiceImplTest {
                 .containsExactly(101L, 102L);
         verify(redisCacheUtil, org.mockito.Mockito.times(2)).deleteUserInterest(1L);
         verify(redisCacheUtil).deleteUserRecommendations(1L);
+    }
+
+    @Test
+    void recordRecommendationClickTreatsNullCaseTagsAsEmptyFeedback() {
+        when(fraudCaseMapper.selectById(10L)).thenReturn(hotCase());
+        when(recommendationLogMapper.selectOne(any())).thenReturn(null);
+        when(fraudCaseMapper.findTagIdsByCaseId(10L)).thenReturn(null);
+
+        service.recordRecommendationClick(1L, 10L, "case");
+
+        verify(recommendationLogMapper).insert(any(RecommendationLog.class));
+        verify(behaviorMatrixMapper, never()).insert(any());
+        verify(behaviorMatrixMapper, never()).updateById(any());
+        verify(redisCacheUtil).deleteUserRecommendations(1L);
+    }
+
+    @Test
+    void getUserInterestAnalysisTreatsNullBehaviorMatrixAsEmptyTags() {
+        UserProfile profile = new UserProfile();
+        profile.setUserId(1L);
+        profile.setLifecycleStage("newbie");
+        profile.setKnowledgeLevel(20);
+
+        when(userProfileMapper.selectByUserId(1L)).thenReturn(profile);
+        when(profileService.determineLifecycleStage(1L)).thenReturn("newbie");
+        when(behaviorMatrixMapper.findByUserId(1L)).thenReturn(null);
+
+        UserInterestVO result = service.getUserInterestAnalysis(1L);
+
+        assertThat(result.getLifecycleStage()).isEqualTo("newbie");
+        assertThat(result.getInterestTags()).isEmpty();
+        verify(userProfileMapper, never()).updateById(any());
+        verify(redisCacheUtil).set(any(), any(UserInterestVO.class), anyLong(), any());
     }
 
     @Test

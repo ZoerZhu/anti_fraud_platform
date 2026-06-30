@@ -54,7 +54,7 @@ public class QAConversationServiceImpl extends ServiceImpl<QAConversationMapper,
         }
 
         // 获取历史对话
-        List<QAConversation> history = qaConversationMapper.findByUserIdAndSessionId(userId, normalizedSessionId);
+        List<QAConversation> history = safeList(qaConversationMapper.findByUserIdAndSessionId(userId, normalizedSessionId));
         List<QAConversation> pairedHistory = history.stream()
                 .filter(h -> hasText(h.getQuestion()) && hasText(h.getAnswer()))
                 .collect(Collectors.toList());
@@ -109,7 +109,7 @@ public class QAConversationServiceImpl extends ServiceImpl<QAConversationMapper,
     public List<ChatVO> getConversationHistory(String sessionId, Long userId) {
         validateUserId(userId);
         String normalizedSessionId = normalizeSessionId(sessionId, userId, false);
-        List<QAConversation> conversations = qaConversationMapper.findByUserIdAndSessionId(userId, normalizedSessionId);
+        List<QAConversation> conversations = safeList(qaConversationMapper.findByUserIdAndSessionId(userId, normalizedSessionId));
         if (conversations.isEmpty()) {
             throw new BusinessException(404, "会话不存在");
         }
@@ -179,13 +179,13 @@ public class QAConversationServiceImpl extends ServiceImpl<QAConversationMapper,
         }
 
         // 更新该会话最后一条记录的反馈
-        List<QAConversation> conversations = qaConversationMapper.selectList(
+        List<QAConversation> conversations = safeList(qaConversationMapper.selectList(
                 new LambdaQueryWrapper<QAConversation>()
                         .eq(QAConversation::getUserId, userId)
                         .eq(QAConversation::getSessionId, normalizedSessionId)
                         .orderByDesc(QAConversation::getCreateTime)
                         .last("LIMIT 1")
-        );
+        ));
 
         if (conversations.isEmpty()) {
             throw new BusinessException(404, "会话不存在");

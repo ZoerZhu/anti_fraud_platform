@@ -310,9 +310,11 @@ public class FraudCaseServiceImpl extends ServiceImpl<FraudCaseMapper, FraudCase
             int knowledgeGain = Math.max(1, safeStayDuration / 30);
             knowledgeGain = Math.min(knowledgeGain, 5);
             var profile = profileService.getProfileByUserId(userId);
-            int newLevel = Math.min(100, (profile.getKnowledgeLevel() != null ? profile.getKnowledgeLevel() : 0) + knowledgeGain);
-            profileService.updateKnowledgeLevel(userId, newLevel);
-            log.debug("浏览案例更新知识水平 userId={} gain={} newLevel={}", userId, knowledgeGain, newLevel);
+            if (profile != null) {
+                int newLevel = Math.min(100, (profile.getKnowledgeLevel() != null ? profile.getKnowledgeLevel() : 0) + knowledgeGain);
+                profileService.updateKnowledgeLevel(userId, newLevel);
+                log.debug("浏览案例更新知识水平 userId={} gain={} newLevel={}", userId, knowledgeGain, newLevel);
+            }
         } catch (Exception e) {
             log.warn("浏览案例更新知识水平失败 userId={} msg={}", userId, e.getMessage());
         }

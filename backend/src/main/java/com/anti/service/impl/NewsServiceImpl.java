@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -288,8 +289,14 @@ public class NewsServiceImpl implements NewsService {
         browseLog.setUserId(userId);
         browseLog.setBrowseTime(LocalDateTime.now());
         browseLog.setStayDuration(clampStayDuration(stayDuration));
-        int rows = browseLogMapper.insert(browseLog);
-        log.debug("资讯浏览记录插入结果 rows={}, logId={}", rows, browseLog.getId());
+        try {
+            int rows = browseLogMapper.insert(browseLog);
+            log.debug("资讯浏览记录插入结果 rows={}, logId={}", rows, browseLog.getId());
+        } catch (Exception e) {
+            log.warn("资讯浏览记录写入失败 newsId={} userId={} err={}",
+                    newsId, userId, e.getClass().getSimpleName());
+            return;
+        }
         cacheRefreshService.handleBrowseEvent(userId, "news", newsId);
         try {
             achievementService.refreshContinuousLearningStreak(userId);
@@ -300,11 +307,17 @@ public class NewsServiceImpl implements NewsService {
 
     @Override
     public IPage<News> getUserBrowseHistory(Long userId, Integer pageNum, Integer pageSize) {
-        Page<NewsBrowseLog> page = new Page<>(pageNum, pageSize);
+        if (userId == null) {
+            throw new BusinessException(401, "请先登录后查看浏览记录");
+        }
+        int safePageNum = safePageNum(pageNum);
+        int safePageSize = safePageSize(pageSize);
+        Page<NewsBrowseLog> page = new Page<>(safePageNum, safePageSize);
         IPage<NewsBrowseLog> browseLogs = browseLogMapper.selectUserBrowseHistory(page, userId);
         
-        Page<News> result = new Page<>(pageNum, pageSize);
+        Page<News> result = new Page<>(safePageNum, safePageSize);
         result.setTotal(browseLogs.getTotal());
+        result.setRecords(new ArrayList<>());
         
         for (NewsBrowseLog browseLog : browseLogs.getRecords()) {
             News news = newsMapper.selectById(browseLog.getNewsId());

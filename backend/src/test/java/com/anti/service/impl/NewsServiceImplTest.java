@@ -8,6 +8,7 @@ import com.anti.mapper.NewsLikeMapper;
 import com.anti.mapper.NewsMapper;
 import com.anti.service.AchievementService;
 import com.anti.service.CacheRefreshService;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,6 +20,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -137,6 +139,48 @@ class NewsServiceImplTest {
         ArgumentCaptor<NewsBrowseLog> captor = ArgumentCaptor.forClass(NewsBrowseLog.class);
         verify(browseLogMapper).insert(captor.capture());
         assertThat(captor.getValue().getStayDuration()).isEqualTo(7200);
+    }
+
+    @Test
+    void addBrowseRecordDoesNotFailReadingWhenLogInsertFails() {
+        when(newsMapper.selectById(10L)).thenReturn(publishedNews());
+        when(browseLogMapper.insert(any(NewsBrowseLog.class))).thenThrow(new RuntimeException("db-secret"));
+
+        assertThatCode(() -> service.addBrowseRecord(10L, 1L, 30))
+                .doesNotThrowAnyException();
+
+        verify(cacheRefreshService, never()).handleBrowseEvent(any(), any(), any());
+        verify(achievementService, never()).refreshContinuousLearningStreak(any());
+    }
+
+    @Test
+    void getUserBrowseHistoryRequiresLogin() {
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.getUserBrowseHistory(null, 1, 10));
+
+        assertThat(exception.getCode()).isEqualTo(401);
+        assertThat(exception.getMessage()).contains("请先登录");
+        verify(browseLogMapper, never()).selectUserBrowseHistory(any(), any());
+    }
+
+    @Test
+    void getUserBrowseHistoryClampsPagination() {
+        NewsBrowseLog log = new NewsBrowseLog();
+        log.setNewsId(10L);
+        Page<NewsBrowseLog> browsePage = new Page<>(1, 100, 1);
+        browsePage.setRecords(List.of(log));
+        when(browseLogMapper.selectUserBrowseHistory(any(Page.class), eq(1L))).thenReturn(browsePage);
+        when(newsMapper.selectById(10L)).thenReturn(publishedNews());
+
+        IPage<News> result = service.getUserBrowseHistory(1L, -1, 999);
+
+        ArgumentCaptor<Page> pageCaptor = ArgumentCaptor.forClass(Page.class);
+        verify(browseLogMapper).selectUserBrowseHistory(pageCaptor.capture(), eq(1L));
+        assertThat(pageCaptor.getValue().getCurrent()).isEqualTo(1);
+        assertThat(pageCaptor.getValue().getSize()).isEqualTo(100);
+        assertThat(result.getCurrent()).isEqualTo(1);
+        assertThat(result.getSize()).isEqualTo(100);
+        assertThat(result.getRecords()).extracting(News::getId).containsExactly(10L);
     }
 
     private News publishedNews() {

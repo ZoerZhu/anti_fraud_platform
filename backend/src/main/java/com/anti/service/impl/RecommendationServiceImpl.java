@@ -52,6 +52,7 @@ public class RecommendationServiceImpl implements RecommendationService {
 
     @Override
     public List<RecommendationVO> getRecommendations(Long userId, int limit, String itemType) {
+        validateUserId(userId);
         int safeLimit = normalizeLimit(limit);
         String type = itemType != null && !itemType.trim().isEmpty() ? normalizeItemType(itemType) : "";
         UserProfile profile = userProfileMapper.selectByUserId(userId);
@@ -125,41 +126,41 @@ public class RecommendationServiceImpl implements RecommendationService {
         out.addAll(getMandatoryNews(Math.min(limit, 5)));
 
         if ("newbie".equals(lifecycle) || "growing".equals(lifecycle)) {
-            List<News> topNews = newsMapper.selectList(
+            List<News> topNews = safeList(newsMapper.selectList(
                     new QueryWrapper<News>().eq("status", 1).eq("is_top", 1)
-                            .orderByDesc("publish_time").last("LIMIT " + limit));
+                            .orderByDesc("publish_time").last("LIMIT " + limit)));
             for (News n : topNews) {
                 out.add(convertNewsToVO(n, List.of("置顶策略")));
             }
-            List<News> warnings = newsMapper.selectList(
+            List<News> warnings = safeList(newsMapper.selectList(
                     new QueryWrapper<News>().eq("status", 1).eq("news_type", "warning")
-                            .orderByDesc("publish_time").last("LIMIT " + limit));
+                            .orderByDesc("publish_time").last("LIMIT " + limit)));
             for (News n : warnings) {
                 out.add(convertNewsToVO(n, List.of("紧急预警")));
             }
         }
 
         if ("growing".equals(lifecycle) || "mature".equals(lifecycle)) {
-            List<UserBehaviorMatrix> behaviors = new ArrayList<>(behaviorMatrixMapper.findByUserId(userId));
+            List<UserBehaviorMatrix> behaviors = new ArrayList<>(safeList(behaviorMatrixMapper.findByUserId(userId)));
             behaviors.sort((a, b) -> b.getBehaviorScore().compareTo(a.getBehaviorScore()));
             for (UserBehaviorMatrix b : behaviors.stream().limit(3).collect(Collectors.toList())) {
                 String tagName = getTagName(b.getTagId());
                 if (tagName == null || tagName.isEmpty()) {
                     continue;
                 }
-                List<News> matched = newsMapper.selectList(new LambdaQueryWrapper<News>()
+                List<News> matched = safeList(newsMapper.selectList(new LambdaQueryWrapper<News>()
                         .eq(News::getStatus, 1)
                         .and(q -> q.like(News::getTitle, tagName).or().like(News::getSummary, tagName))
                         .orderByDesc(News::getViewCount)
-                        .last("LIMIT 6"));
+                        .last("LIMIT 6")));
                 for (News n : matched) {
                     out.add(convertNewsToVO(n, List.of("基于兴趣标签（" + tagName + "）")));
                 }
             }
         }
 
-        List<News> hot = newsMapper.selectList(
-                new QueryWrapper<News>().eq("status", 1).orderByDesc("view_count").last("LIMIT " + (limit * 2)));
+        List<News> hot = safeList(newsMapper.selectList(
+                new QueryWrapper<News>().eq("status", 1).orderByDesc("view_count").last("LIMIT " + (limit * 2))));
         for (News n : hot) {
             out.add(convertNewsToVO(n, List.of("浏览热度")));
         }
@@ -185,15 +186,15 @@ public class RecommendationServiceImpl implements RecommendationService {
             for (Challenge c : getScenarioChallenges(limit)) {
                 out.add(convertChallengeToVO(c, "新手期·情景模拟优先（动态上下文）"));
             }
-            List<Challenge> quiz = challengeMapper.selectList(
+            List<Challenge> quiz = safeList(challengeMapper.selectList(
                     new QueryWrapper<Challenge>().eq("status", 1).ne("type", "scenario")
-                            .orderByAsc("level_order").last("LIMIT " + limit));
+                            .orderByAsc("level_order").last("LIMIT " + limit)));
             for (Challenge c : quiz) {
                 out.add(convertChallengeToVO(c, "新手期·知识闯关"));
             }
         } else if ("growing".equals(lifecycle)) {
-            List<Challenge> all = challengeMapper.selectList(
-                    new QueryWrapper<Challenge>().eq("status", 1).orderByAsc("level_order"));
+            List<Challenge> all = safeList(challengeMapper.selectList(
+                    new QueryWrapper<Challenge>().eq("status", 1).orderByAsc("level_order")));
             int kl = profile.getKnowledgeLevel() != null ? profile.getKnowledgeLevel() : 40;
             int targetDiff = Math.min(5, Math.max(1, kl / 25 + 1));
             for (Challenge c : all) {
@@ -214,8 +215,8 @@ public class RecommendationServiceImpl implements RecommendationService {
                 }
             }
         } else {
-            List<Challenge> all = challengeMapper.selectList(
-                    new QueryWrapper<Challenge>().eq("status", 1).orderByDesc("score_reward"));
+            List<Challenge> all = safeList(challengeMapper.selectList(
+                    new QueryWrapper<Challenge>().eq("status", 1).orderByDesc("score_reward")));
             for (Challenge c : all.stream().limit(limit).collect(Collectors.toList())) {
                 out.add(convertChallengeToVO(c, "成熟期·高价值关卡"));
             }
@@ -263,6 +264,7 @@ public class RecommendationServiceImpl implements RecommendationService {
      */
     @Override
     public List<RecommendationVO> getNewbieRecommendations(Long userId, int limit) {
+        validateUserId(userId);
         int safeLimit = normalizeLimit(limit);
         List<RecommendationVO> recommendations = computeNewbieRecommendations(userId, safeLimit);
         recordRecommendationExposures(userId, recommendations, "newbie");
@@ -339,6 +341,7 @@ public class RecommendationServiceImpl implements RecommendationService {
      */
     @Override
     public List<RecommendationVO> getGrowingRecommendations(Long userId, int limit) {
+        validateUserId(userId);
         int safeLimit = normalizeLimit(limit);
         List<RecommendationVO> recommendations = computeGrowingRecommendations(userId, safeLimit);
         recordRecommendationExposures(userId, recommendations, "growing");
@@ -352,7 +355,7 @@ public class RecommendationServiceImpl implements RecommendationService {
         if (profile == null) {
             profile = initUserProfile(userId);
         }
-        List<UserBehaviorMatrix> userTags = behaviorMatrixMapper.findByUserId(userId);
+        List<UserBehaviorMatrix> userTags = safeList(behaviorMatrixMapper.findByUserId(userId));
 
         Map<Long, BigDecimal> userInterestVector = buildInterestVector(userTags);
         List<String> userTagNames = extractTagNames(userTags);
@@ -401,6 +404,7 @@ public class RecommendationServiceImpl implements RecommendationService {
      */
     @Override
     public List<RecommendationVO> getMatureRecommendations(Long userId, int limit) {
+        validateUserId(userId);
         int safeLimit = normalizeLimit(limit);
         List<RecommendationVO> recommendations = computeMatureRecommendations(userId, safeLimit);
         recordRecommendationExposures(userId, recommendations, "mature");
@@ -414,7 +418,7 @@ public class RecommendationServiceImpl implements RecommendationService {
         if (profile == null) {
             profile = initUserProfile(userId);
         }
-        Map<Long, BigDecimal> userInterestVector = buildInterestVector(behaviorMatrixMapper.findByUserId(userId));
+        Map<Long, BigDecimal> userInterestVector = buildInterestVector(safeList(behaviorMatrixMapper.findByUserId(userId)));
         if (userInterestVector.isEmpty()) {
             return computeNewbieRecommendations(userId, limit);
         }
@@ -451,6 +455,7 @@ public class RecommendationServiceImpl implements RecommendationService {
 
     @Override
     public UserInterestVO getUserInterestAnalysis(Long userId) {
+        validateUserId(userId);
         log.info("=== getUserInterestAnalysis 开始: userId={} ===", userId);
         String cacheKey = CacheConstants.getUserInterestKey(userId);
         
@@ -470,7 +475,7 @@ public class RecommendationServiceImpl implements RecommendationService {
             userProfileMapper.updateById(profile);
         }
         
-        List<UserBehaviorMatrix> behaviors = behaviorMatrixMapper.findByUserId(userId);
+        List<UserBehaviorMatrix> behaviors = safeList(behaviorMatrixMapper.findByUserId(userId));
 
         UserInterestVO vo = new UserInterestVO();
         vo.setLifecycleStage(lifecycleStage);
@@ -480,7 +485,7 @@ public class RecommendationServiceImpl implements RecommendationService {
 
         List<UserInterestVO.TagScore> interestTags = new ArrayList<>();
         Map<Long, BigDecimal> userVector = new HashMap<>();
-        for (UserBehaviorMatrix b : behaviors) {
+        for (UserBehaviorMatrix b : safeList(behaviors)) {
             UserInterestVO.TagScore ts = new UserInterestVO.TagScore();
             ts.setTagId(b.getTagId());
             ts.setTagName(getTagName(b.getTagId()));
@@ -510,6 +515,7 @@ public class RecommendationServiceImpl implements RecommendationService {
 
     @Override
     public void recordRecommendationClick(Long userId, Long itemId, String itemType) {
+        validateUserId(userId);
         String normalizedType = normalizeItemType(itemType);
         validateRecommendableItem(itemId, normalizedType);
         LambdaQueryWrapper<RecommendationLog> wrapper = new LambdaQueryWrapper<>();
@@ -536,7 +542,7 @@ public class RecommendationServiceImpl implements RecommendationService {
         }
 
         if ("case".equals(normalizedType)) {
-            List<Long> tagIds = fraudCaseMapper.findTagIdsByCaseId(itemId);
+            List<Long> tagIds = safeList(fraudCaseMapper.findTagIdsByCaseId(itemId));
             for (Long tagId : tagIds) {
                 if (tagId != null) {
                     updateUserBehaviorMatrix(userId, tagId, BigDecimal.ONE);
@@ -566,27 +572,31 @@ public class RecommendationServiceImpl implements RecommendationService {
 
     @Override
     public void calculateAndUpdateUserSimilarity(Long userId) {
+        validateUserId(userId);
         UserBehaviorMatrix target = behaviorMatrixMapper.findByUserAndTag(userId, 0L);
         if (target == null) {
             return;
         }
 
         Map<Long, BigDecimal> targetVector = new HashMap<>();
-        List<UserBehaviorMatrix> targetBehaviors = behaviorMatrixMapper.findByUserId(userId);
+        List<UserBehaviorMatrix> targetBehaviors = safeList(behaviorMatrixMapper.findByUserId(userId));
         for (UserBehaviorMatrix b : targetBehaviors) {
             targetVector.put(b.getTagId(), b.getBehaviorScore());
         }
 
         QueryWrapper<UserBehaviorMatrix> wrapper = new QueryWrapper<>();
         wrapper.select("DISTINCT user_id");
-        List<Object> userIds = behaviorMatrixMapper.selectObjs(wrapper);
+        List<Object> userIds = safeList(behaviorMatrixMapper.selectObjs(wrapper));
 
         for (Object obj : userIds) {
-            Long otherId = ((Number) obj).longValue();
+            if (!(obj instanceof Number number)) {
+                continue;
+            }
+            Long otherId = number.longValue();
             if (otherId.equals(userId)) continue;
 
             Map<Long, BigDecimal> otherVector = new HashMap<>();
-            List<UserBehaviorMatrix> otherBehaviors = behaviorMatrixMapper.findByUserId(otherId);
+            List<UserBehaviorMatrix> otherBehaviors = safeList(behaviorMatrixMapper.findByUserId(otherId));
             for (UserBehaviorMatrix b : otherBehaviors) {
                 otherVector.put(b.getTagId(), b.getBehaviorScore());
             }
@@ -618,10 +628,13 @@ public class RecommendationServiceImpl implements RecommendationService {
         log.info("开始批量计算用户相似度");
         QueryWrapper<UserBehaviorMatrix> wrapper = new QueryWrapper<>();
         wrapper.select("DISTINCT user_id");
-        List<Object> userIds = behaviorMatrixMapper.selectObjs(wrapper);
+        List<Object> userIds = safeList(behaviorMatrixMapper.selectObjs(wrapper));
 
         for (Object obj : userIds) {
-            Long userId = ((Number) obj).longValue();
+            if (!(obj instanceof Number number)) {
+                continue;
+            }
+            Long userId = number.longValue();
             try {
                 calculateAndUpdateUserSimilarity(userId);
             } catch (Exception e) {
@@ -650,7 +663,7 @@ public class RecommendationServiceImpl implements RecommendationService {
                 .orderByDesc("wilson_score")
                 .last("LIMIT " + (limit * 2));
 
-        List<FraudCase> cases = fraudCaseMapper.selectList(wrapper);
+        List<FraudCase> cases = safeList(fraudCaseMapper.selectList(wrapper));
         return cases.stream()
                 .filter(c -> matchTargetAudience(c, profile))
                 .limit(limit)
@@ -698,35 +711,35 @@ public class RecommendationServiceImpl implements RecommendationService {
     }
 
     private List<FraudCase> getHotCases(int limit) {
-        return fraudCaseMapper.selectList(
+        return safeList(fraudCaseMapper.selectList(
                 new QueryWrapper<FraudCase>()
                         .eq("status", 1)
                         .orderByDesc("view_count")
                         .last("LIMIT " + limit)
-        );
+        ));
     }
 
     private List<Challenge> getScenarioChallenges(int limit) {
-        return challengeMapper.selectList(
+        return safeList(challengeMapper.selectList(
                 new QueryWrapper<Challenge>()
                         .eq("status", 1)
                         .eq("type", "scenario")
                         .orderByAsc("level_order")
                         .last("LIMIT " + limit)
-        );
+        ));
     }
 
     private List<Challenge> getBasicChallenges(int limit) {
-        return challengeMapper.selectList(
+        return safeList(challengeMapper.selectList(
                 new QueryWrapper<Challenge>()
                         .eq("status", 1)
                         .orderByAsc("level_order")
                         .last("LIMIT " + Math.max(1, limit))
-        );
+        ));
     }
 
     private List<RecommendationVO> getMandatoryNews(int limit) {
-        List<News> news = newsMapper.selectRequiredNews(Math.max(1, limit));
+        List<News> news = safeList(newsMapper.selectRequiredNews(Math.max(1, limit)));
         return news.stream()
                 .map(n -> {
                     RecommendationVO vo = convertNewsToVO(n, List.of("全校必读（置顶策略）"));
@@ -766,12 +779,12 @@ public class RecommendationServiceImpl implements RecommendationService {
     }
 
     private List<String> getTagHistory(Long userId) {
-        List<CaseBrowseLog> logs = caseBrowseLogMapper.selectList(
+        List<CaseBrowseLog> logs = safeList(caseBrowseLogMapper.selectList(
                 new LambdaQueryWrapper<CaseBrowseLog>()
                         .eq(CaseBrowseLog::getUserId, userId)
                         .orderByDesc(CaseBrowseLog::getBrowseTime)
                         .last("LIMIT 50")
-        );
+        ));
 
         Set<Long> caseIds = logs.stream()
                 .map(CaseBrowseLog::getCaseId)
@@ -783,10 +796,10 @@ public class RecommendationServiceImpl implements RecommendationService {
         }
 
         // Step 1: get tag IDs via case_tag_relation
-        List<CaseTagRelation> relations = caseTagRelationMapper.selectList(
+        List<CaseTagRelation> relations = safeList(caseTagRelationMapper.selectList(
                 new LambdaQueryWrapper<CaseTagRelation>()
                         .in(CaseTagRelation::getCaseId, caseIds)
-        );
+        ));
 
         Set<Long> tagIds = relations.stream()
                 .map(CaseTagRelation::getTagId)
@@ -798,10 +811,10 @@ public class RecommendationServiceImpl implements RecommendationService {
         }
 
         // Step 2: get tag names from case_tag
-        List<CaseTag> tags = caseTagMapper.selectList(
+        List<CaseTag> tags = safeList(caseTagMapper.selectList(
                 new LambdaQueryWrapper<CaseTag>()
                         .in(CaseTag::getId, tagIds)
-        );
+        ));
 
         return tags.stream()
                 .map(CaseTag::getName)
@@ -811,9 +824,9 @@ public class RecommendationServiceImpl implements RecommendationService {
     }
 
     private List<FraudCase> getContentBasedRecommendations(Map<Long, BigDecimal> userVector, int limit) {
-        List<FraudCase> allCases = fraudCaseMapper.selectList(
+        List<FraudCase> allCases = safeList(fraudCaseMapper.selectList(
                 new QueryWrapper<FraudCase>().eq("status", 1)
-        );
+        ));
 
         return allCases.stream()
                 .sorted((c1, c2) -> {
@@ -829,7 +842,7 @@ public class RecommendationServiceImpl implements RecommendationService {
         if (c.getId() == null) {
             return BigDecimal.ZERO;
         }
-        List<Long> caseTags = fraudCaseMapper.findTagIdsByCaseId(c.getId());
+        List<Long> caseTags = safeList(fraudCaseMapper.findTagIdsByCaseId(c.getId()));
         Map<Long, BigDecimal> caseVector = new HashMap<>();
         for (Long tagId : caseTags) {
             caseVector.put(tagId, BigDecimal.ONE);
@@ -838,7 +851,7 @@ public class RecommendationServiceImpl implements RecommendationService {
     }
 
     private List<String> spmPredict(List<String> userTags, List<String> tagHistory) {
-        Map<String, List<String>> rules = associationRuleMapper.findAllActiveRules().stream()
+        Map<String, List<String>> rules = safeList(associationRuleMapper.findAllActiveRules()).stream()
                 .collect(Collectors.toMap(
                         AssociationRule::getTriggerTag,
                         r -> parseStringArray(r.getPredictedTags()),
@@ -932,13 +945,13 @@ public class RecommendationServiceImpl implements RecommendationService {
         LambdaQueryWrapper<UserProfile> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(UserProfile::getGrade, profile.getGrade())
                 .ne(UserProfile::getUserId, userId);
-        List<UserProfile> circle = userProfileMapper.selectList(wrapper);
+        List<UserProfile> circle = safeList(userProfileMapper.selectList(wrapper));
         return circle.stream().map(UserProfile::getUserId).collect(Collectors.toList());
     }
 
     private List<UserSimilarity> findKNearestNeighbors(Long userId, List<Long> candidateUsers, int k) {
         List<UserSimilarity> all = new ArrayList<>();
-        for (Long candidateId : candidateUsers) {
+        for (Long candidateId : safeList(candidateUsers)) {
             UserSimilarity sim = similarityMapper.findByUserPair(userId, candidateId);
             if (sim == null) {
                 sim = similarityMapper.findByUserPair(candidateId, userId);
@@ -963,7 +976,7 @@ public class RecommendationServiceImpl implements RecommendationService {
                     neighbor.getUserIdB() : neighbor.getUserIdA();
             BigDecimal similarity = neighbor.getSimilarityScore();
 
-            List<UserBehaviorMatrix> neighborBehaviors = behaviorMatrixMapper.findByUserId(neighborId);
+            List<UserBehaviorMatrix> neighborBehaviors = safeList(behaviorMatrixMapper.findByUserId(neighborId));
             for (UserBehaviorMatrix b : neighborBehaviors) {
                 if (!userVector.containsKey(b.getTagId())) {
                     neighborRatings.computeIfAbsent(b.getTagId(), k -> new ArrayList<>());
@@ -1008,11 +1021,11 @@ public class RecommendationServiceImpl implements RecommendationService {
     }
 
     private List<RecommendationVO> deduplicateAndSort(List<RecommendationVO> results, Long userId, int limit) {
-        Set<Long> excludedCases = new HashSet<>(recommendationLogMapper.findRecommendedCaseIds(userId));
-        Set<Long> excludedNews = new HashSet<>(recommendationLogMapper.findRecommendedNewsIds(userId));
-        Set<Long> excludedCh = new HashSet<>(recommendationLogMapper.findRecommendedChallengeIds(userId));
+        Set<Long> excludedCases = new HashSet<>(safeList(recommendationLogMapper.findRecommendedCaseIds(userId)));
+        Set<Long> excludedNews = new HashSet<>(safeList(recommendationLogMapper.findRecommendedNewsIds(userId)));
+        Set<Long> excludedCh = new HashSet<>(safeList(recommendationLogMapper.findRecommendedChallengeIds(userId)));
 
-        List<RecommendationVO> sorted = results.stream()
+        List<RecommendationVO> sorted = safeList(results).stream()
                 .filter(vo -> vo.getItemId() != null && vo.getItemType() != null)
                 .sorted((a, b) -> {
                     BigDecimal sa = a.getScore() != null ? a.getScore() : BigDecimal.ZERO;
@@ -1073,16 +1086,21 @@ public class RecommendationServiceImpl implements RecommendationService {
             if (vo.getItemId() == null || vo.getItemType() == null) {
                 continue;
             }
-            RecommendationLog log = new RecommendationLog();
-            log.setUserId(userId);
-            log.setItemId(vo.getItemId());
-            log.setItemType(vo.getItemType());
-            log.setRecommendReason(toReasonJson(vo.getReasons()));
-            log.setScore(vo.getScore());
-            log.setLifecycleStage(lifecycleStage);
-            log.setClicked(0);
-            log.setCreateTime(java.time.LocalDateTime.now());
-            recommendationLogMapper.insert(log);
+            RecommendationLog exposureLog = new RecommendationLog();
+            exposureLog.setUserId(userId);
+            exposureLog.setItemId(vo.getItemId());
+            exposureLog.setItemType(vo.getItemType());
+            exposureLog.setRecommendReason(toReasonJson(vo.getReasons()));
+            exposureLog.setScore(vo.getScore());
+            exposureLog.setLifecycleStage(lifecycleStage);
+            exposureLog.setClicked(0);
+            exposureLog.setCreateTime(java.time.LocalDateTime.now());
+            try {
+                recommendationLogMapper.insert(exposureLog);
+            } catch (Exception e) {
+                log.warn("推荐曝光记录写入失败 userId={} itemType={} itemId={} err={}",
+                        userId, vo.getItemType(), vo.getItemId(), e.getClass().getSimpleName());
+            }
         }
     }
 
@@ -1096,6 +1114,12 @@ public class RecommendationServiceImpl implements RecommendationService {
 
     private int normalizeLimit(int limit) {
         return Math.max(1, Math.min(limit, 50));
+    }
+
+    private void validateUserId(Long userId) {
+        if (userId == null || userId <= 0) {
+            throw new BusinessException(401, "请先登录");
+        }
     }
 
     private String normalizeItemType(String itemType) {
@@ -1165,7 +1189,7 @@ public class RecommendationServiceImpl implements RecommendationService {
         if (caseId == null) {
             return new ArrayList<>();
         }
-        List<Long> tagIds = fraudCaseMapper.findTagIdsByCaseId(caseId);
+        List<Long> tagIds = safeList(fraudCaseMapper.findTagIdsByCaseId(caseId));
         List<String> names = new ArrayList<>();
         for (Long tid : tagIds) {
             CaseTag t = caseTagMapper.selectById(tid);
@@ -1174,6 +1198,10 @@ public class RecommendationServiceImpl implements RecommendationService {
             }
         }
         return names;
+    }
+
+    private <T> List<T> safeList(List<T> values) {
+        return values == null ? Collections.emptyList() : values;
     }
 
     private RecommendationVO convertChallengeToVO(Challenge c, String reason) {

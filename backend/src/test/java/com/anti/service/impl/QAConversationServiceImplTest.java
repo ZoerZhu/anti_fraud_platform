@@ -114,6 +114,22 @@ class QAConversationServiceImplTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void askQuestionTreatsNullHistoryAsEmpty() {
+        String sessionId = "session_1_1000";
+        when(qaConversationMapper.findByUserIdAndSessionId(1L, sessionId)).thenReturn(null);
+        when(deepSeekClient.chat(anyString(), eq("测试问题"), any())).thenReturn(successResponse("安全回答", 8));
+        when(deepSeekClient.getModel()).thenReturn("deepseek-chat");
+
+        ChatVO result = service.askQuestion("测试问题", sessionId, 1L);
+
+        assertThat(result.getAnswer()).isEqualTo("安全回答");
+        ArgumentCaptor<List<String[]>> historyCaptor = ArgumentCaptor.forClass(List.class);
+        verify(deepSeekClient).chat(anyString(), eq("测试问题"), historyCaptor.capture());
+        assertThat(historyCaptor.getValue()).isEmpty();
+    }
+
+    @Test
     void askQuestionUsesClearFallbackWhenApiKeyMissing() {
         String sessionId = "session_1_1000";
         when(qaConversationMapper.findByUserIdAndSessionId(1L, sessionId)).thenReturn(List.of());
@@ -176,8 +192,31 @@ class QAConversationServiceImplTest {
     }
 
     @Test
+    void getConversationHistoryRejectsNullMapperResultAsMissingSession() {
+        when(qaConversationMapper.findByUserIdAndSessionId(1L, "session_1_1000")).thenReturn(null);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.getConversationHistory("session_1_1000", 1L));
+
+        assertThat(exception.getCode()).isEqualTo(404);
+        assertThat(exception.getMessage()).contains("会话不存在");
+    }
+
+    @Test
     void submitFeedbackRejectsMissingSession() {
         when(qaConversationMapper.selectList(any())).thenReturn(List.of());
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.submitFeedback("session_1_1000", 1, 1L));
+
+        assertThat(exception.getCode()).isEqualTo(404);
+        assertThat(exception.getMessage()).contains("会话不存在");
+        verify(qaConversationMapper, never()).updateById(any());
+    }
+
+    @Test
+    void submitFeedbackRejectsNullMapperResultAsMissingSession() {
+        when(qaConversationMapper.selectList(any())).thenReturn(null);
 
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> service.submitFeedback("session_1_1000", 1, 1L));

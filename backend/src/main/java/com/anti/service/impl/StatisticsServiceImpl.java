@@ -267,11 +267,30 @@ public class StatisticsServiceImpl implements StatisticsService {
 
     @Override
     public List<Map<String, Object>> getCompletionRate() {
+        List<Map<String, Object>> rows;
         try {
-            return statisticsQueryMapper.selectCompletionRate();
+            rows = statisticsQueryMapper.selectCompletionRate();
         } catch (Exception e) {
             return new ArrayList<>();
         }
+        if (rows == null || rows.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        List<Map<String, Object>> normalized = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            if (row == null) {
+                continue;
+            }
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("grade", row.get("grade") != null ? row.get("grade").toString() : "未分组");
+            item.put("major", row.get("major") != null ? row.get("major").toString() : "");
+            item.put("completed_users", toInt(row.get("completed_users")));
+            item.put("total_users", toInt(row.get("total_users")));
+            item.put("completion_rate", toScaledDecimal(row.get("completion_rate"), 1));
+            normalized.add(item);
+        }
+        return normalized;
     }
 
     @Override
@@ -490,5 +509,23 @@ public class StatisticsServiceImpl implements StatisticsService {
         String safeGrade = grade == null || grade.isBlank() ? "未分组" : grade;
         String safeMajor = major == null || major.isBlank() ? "" : major;
         return safeMajor.isEmpty() ? safeGrade : safeGrade + "-" + safeMajor;
+    }
+
+    private int toInt(Object value) {
+        if (value == null) {
+            return 0;
+        }
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        return new BigDecimal(value.toString()).intValue();
+    }
+
+    private BigDecimal toScaledDecimal(Object value, int scale) {
+        if (value == null) {
+            return BigDecimal.ZERO.setScale(scale, RoundingMode.HALF_UP);
+        }
+        BigDecimal decimal = value instanceof BigDecimal bd ? bd : new BigDecimal(value.toString());
+        return decimal.setScale(scale, RoundingMode.HALF_UP);
     }
 }

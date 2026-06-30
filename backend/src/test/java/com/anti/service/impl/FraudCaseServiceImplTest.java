@@ -140,6 +140,20 @@ class FraudCaseServiceImplTest {
     }
 
     @Test
+    void browseCaseSkipsKnowledgeUpdateWhenProfileMissing() {
+        when(fraudCaseMapper.selectById(10L)).thenReturn(publishedCase());
+        when(caseBrowseLogMapper.countByUserIdAndCaseId(1L, 10L)).thenReturn(0);
+        when(caseBrowseLogMapper.insert(any())).thenReturn(1);
+        when(profileService.getProfileByUserId(1L)).thenReturn(null);
+
+        service.browseCase(10L, 1L, 90);
+
+        verify(caseBrowseLogMapper).insert(any(CaseBrowseLog.class));
+        verify(scoreService).addScore(1L, 2, "浏览案例");
+        verify(profileService, never()).updateKnowledgeLevel(any(), any());
+    }
+
+    @Test
     void createCaseAsDraftDoesNotSetPublishTime() {
         when(fraudCaseMapper.insert(any())).thenAnswer(invocation -> {
             FraudCase saved = invocation.getArgument(0);
