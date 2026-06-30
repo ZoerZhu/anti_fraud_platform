@@ -39,6 +39,7 @@ public class UserServiceImpl implements com.anti.service.UserService {
     private final RedisTemplate<String, String> redisTemplate;
 
     private static final String TOKEN_BLACKLIST_PREFIX = "token:blacklist:";
+    private static final int MAX_USER_PAGE_SIZE = 50;
 
     @Override
     public LoginVO login(LoginRequest request) {
@@ -67,8 +68,12 @@ public class UserServiceImpl implements com.anti.service.UserService {
 
         String token = jwtUtils.generateToken(user.getUsername(), user.getRole(), user.getId());
 
-        user.setLastLoginTime(LocalDateTime.now());
-        userMapper.updateById(user);
+        try {
+            user.setLastLoginTime(LocalDateTime.now());
+            userMapper.updateById(user);
+        } catch (Exception e) {
+            log.warn("更新最后登录时间失败 userId={}: {}", user.getId(), e.getMessage());
+        }
         try {
             achievementService.checkAndUnlockAchievements(user.getId(), "login_count", 1);
             achievementService.refreshContinuousLearningStreak(user.getId());
@@ -91,7 +96,8 @@ public class UserServiceImpl implements com.anti.service.UserService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public User register(RegisterRequest request) {
-        String username = request.getUsername();
+        String username = normalizeRequired(request.getUsername());
+        String studentNo = normalizeRequired(request.getStudentNo());
 
         User existUser = userMapper.selectOne(
             new LambdaQueryWrapper<User>().eq(User::getUsername, username)
@@ -101,24 +107,22 @@ public class UserServiceImpl implements com.anti.service.UserService {
             throw new BusinessException("用户名已存在");
         }
 
-        if (StringUtils.hasText(request.getStudentNo())) {
-            User existStudent = userMapper.selectOne(
-                new LambdaQueryWrapper<User>().eq(User::getStudentNo, request.getStudentNo())
-            );
-            if (existStudent != null) {
-                throw new BusinessException("学号已被注册");
-            }
+        User existStudent = userMapper.selectOne(
+            new LambdaQueryWrapper<User>().eq(User::getStudentNo, studentNo)
+        );
+        if (existStudent != null) {
+            throw new BusinessException("学号已被注册");
         }
 
         User user = new User();
         user.setUsername(username);
         user.setPassword(passwordEncoder.encode(request.getPassword()));
-        user.setNickname(request.getNickname() != null ? request.getNickname() : username);
-        user.setPhone(request.getPhone());
-        user.setEmail(request.getEmail());
-        user.setStudentNo(request.getStudentNo());
-        user.setGrade(request.getGrade());
-        user.setMajor(request.getMajor());
+        user.setNickname(normalizeOptional(request.getNickname(), username));
+        user.setPhone(normalizeOptional(request.getPhone(), null));
+        user.setEmail(normalizeOptional(request.getEmail(), null));
+        user.setStudentNo(studentNo);
+        user.setGrade(normalizeRequired(request.getGrade()));
+        user.setMajor(normalizeOptional(request.getMajor(), null));
         user.setRole("student");
         user.setStatus(1);
         user.setCreateTime(LocalDateTime.now());
@@ -151,26 +155,37 @@ public class UserServiceImpl implements com.anti.service.UserService {
         }
 
         if (StringUtils.hasText(request.getNickname())) {
-            user.setNickname(request.getNickname());
+            user.setNickname(request.getNickname().trim());
         }
-        if (StringUtils.hasText(request.getPhone())) {
-            user.setPhone(request.getPhone());
+        if (request.getPhone() != null) {
+            user.setPhone(normalizeOptional(request.getPhone(), null));
         }
-        if (StringUtils.hasText(request.getEmail())) {
-            user.setEmail(request.getEmail());
+        if (request.getEmail() != null) {
+            user.setEmail(normalizeOptional(request.getEmail(), null));
         }
-        if (StringUtils.hasText(request.getAvatar())) {
-            user.setAvatar(request.getAvatar());
+        if (request.getAvatar() != null) {
+            user.setAvatar(normalizeOptional(request.getAvatar(), null));
         }
-        if (StringUtils.hasText(request.getGrade())) {
-            user.setGrade(request.getGrade());
+        if (request.getGrade() != null) {
+            user.setGrade(normalizeOptional(request.getGrade(), null));
         }
-        if (StringUtils.hasText(request.getMajor())) {
-            user.setMajor(request.getMajor());
+        if (request.getMajor() != null) {
+            user.setMajor(normalizeOptional(request.getMajor(), null));
         }
 
         user.setUpdateTime(LocalDateTime.now());
         userMapper.updateById(user);
+
+        if (request.getGrade() != null || request.getMajor() != null) {
+            UpdateProfileRequest profileRequest = new UpdateProfileRequest();
+            profileRequest.setGrade(user.getGrade());
+            profileRequest.setMajor(user.getMajor());
+            try {
+                profileService.updateProfile(user.getId(), profileRequest);
+            } catch (Exception e) {
+                log.warn("同步用户画像年级专业失败 userId={}: {}", user.getId(), e.getMessage());
+            }
+        }
 
         log.info("用户信息更新: userId={}", request.getId());
     }
@@ -196,7 +211,16 @@ public class UserServiceImpl implements com.anti.service.UserService {
 
     @Override
     public IPage<UserVO> getUserList(Page<User> page, String keyword, String role, Integer status) {
-        IPage<User> userPage = userMapper.selectUserPage(page, keyword, role, status);
+        page.setCurrent(Math.max(1, page.getCurrent()));
+        page.setSize(Math.min(Math.max(1, page.getSize()), MAX_USER_PAGE_SIZE));
+        String safeKeyword = normalizeOptional(keyword, null);
+        if (safeKeyword != null && safeKeyword.length() > 50) {
+            safeKeyword = safeKeyword.substring(0, 50);
+        }
+        String safeRole = ("admin".equals(role) || "student".equals(role)) ? role : null;
+        Integer safeStatus = (status != null && (status == 0 || status == 1)) ? status : null;
+
+        IPage<User> userPage = userMapper.selectUserPage(page, safeKeyword, safeRole, safeStatus);
         IPage<UserVO> voPage = new Page<>(userPage.getCurrent(), userPage.getSize(), userPage.getTotal());
 
         voPage.setRecords(userPage.getRecords().stream().map(this::convertToUserVO).toList());
@@ -243,15 +267,19 @@ public class UserServiceImpl implements com.anti.service.UserService {
         if (token != null && token.startsWith("Bearer ")) {
             token = token.substring(7);
         }
-        if (jwtUtils.validateToken(token)) {
+        if (token != null && jwtUtils.validateToken(token)) {
             Long expiration = jwtUtils.getExpirationFromToken(token);
             if (expiration > 0) {
-                redisTemplate.opsForValue().set(
-                    TOKEN_BLACKLIST_PREFIX + token,
-                    "blacklisted",
-                    expiration,
-                    TimeUnit.MILLISECONDS
-                );
+                try {
+                    redisTemplate.opsForValue().set(
+                        TOKEN_BLACKLIST_PREFIX + token,
+                        "blacklisted",
+                        expiration,
+                        TimeUnit.MILLISECONDS
+                    );
+                } catch (Exception e) {
+                    log.warn("Token加入黑名单失败(Redis不可用): {}", e.getMessage());
+                }
             }
         }
         log.info("用户退出登录");
@@ -262,5 +290,16 @@ public class UserServiceImpl implements com.anti.service.UserService {
         BeanUtils.copyProperties(user, vo);
         vo.setStudentNo(user.getStudentNo());
         return vo;
+    }
+
+    private static String normalizeRequired(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private static String normalizeOptional(String value, String defaultValue) {
+        if (!StringUtils.hasText(value)) {
+            return defaultValue;
+        }
+        return value.trim();
     }
 }

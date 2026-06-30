@@ -159,17 +159,18 @@ function initCropper() {
     cropBoxResizable: true,
     toggleDragModeOnDblclick: false,
     ready() {
-      const containerData = cropper!.getContainerData()
-      const cropBoxData = cropper!.getCropBoxData()
+      const legacyCropper = cropper as any
+      const containerData = legacyCropper.getContainerData()
+      const cropBoxData = legacyCropper.getCropBoxData()
       const minSize = Math.min(containerData.width, containerData.height) * 0.3
       if (cropBoxData.width < minSize || cropBoxData.height < minSize) {
-        cropper!.setCropBoxData({
+        legacyCropper.setCropBoxData({
           width: minSize,
           height: minSize
         })
       }
     }
-  })
+  } as any)
 }
 
 function buildCenterSquareCanvas(image: HTMLImageElement): HTMLCanvasElement {
@@ -237,7 +238,7 @@ async function handleUpload() {
 
     uploadProgress.value = 100
 
-    emit('update:modelValue', res.data)
+    emit('update:modelValue', res)
     ElMessage.success('头像上传成功')
 
     dialogVisible.value = false

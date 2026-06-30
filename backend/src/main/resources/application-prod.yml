@@ -45,3 +45,16 @@ springdoc:
     enabled: false
   swagger-ui:
     enabled: false
+
+app:
+  cors:
+    allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:https://your-school-domain.example.com}
+    max-age: 3600
+
+deepseek:
+  api-url: ${DEEPSEEK_API_URL:https://api.deepseek.com/chat/completions}
+  api-key: ${DEEPSEEK_API_KEY:}
+  model: ${DEEPSEEK_MODEL:deepseek-chat}
+  max-tokens: ${DEEPSEEK_MAX_TOKENS:2048}
+  temperature: ${DEEPSEEK_TEMPERATURE:0.7}
+  timeout-ms: ${DEEPSEEK_TIMEOUT_MS:15000}

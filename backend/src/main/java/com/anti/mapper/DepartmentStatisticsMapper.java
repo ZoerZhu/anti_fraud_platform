@@ -28,6 +28,12 @@ public interface DepartmentStatisticsMapper extends BaseMapper<DepartmentStatist
     List<DepartmentStatistics> selectRecentDays(@Param("startDate") LocalDate startDate);
 
     /**
+     * 按日期范围查询院系统计数据（闭区间）
+     */
+    @Select("SELECT * FROM department_statistics WHERE stat_date >= #{startDate} AND stat_date <= #{endDate} ORDER BY stat_date ASC, user_count DESC")
+    List<DepartmentStatistics> selectDateRange(@Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
+
+    /**
      * 按年级统计
      */
     @Select("SELECT grade, SUM(user_count) as user_count, AVG(avg_test_score) as avg_test_score, AVG(completion_rate) as completion_rate " +

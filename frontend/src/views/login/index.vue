@@ -19,14 +19,13 @@
           @submit.prevent="handleLogin"
           class="login-card__form"
         >
-          <el-form-item prop="username" class="login-card__item">
+      <el-form-item prop="username" class="login-card__item">
             <el-input
               v-model="form.username"
               placeholder="请输入用户名"
               size="large"
               :prefix-icon="User"
               class="login-card__input"
-              @keyup.enter="handleLogin"
             />
           </el-form-item>
 
@@ -39,12 +38,11 @@
               :prefix-icon="Lock"
               show-password
               class="login-card__input"
-              @keyup.enter="handleLogin"
             />
           </el-form-item>
 
           <el-form-item class="login-card__item login-card__item--row">
-            <el-checkbox v-model="rememberPwd">记住密码</el-checkbox>
+            <el-checkbox v-model="rememberUsername">记住用户名</el-checkbox>
             <span class="login-card__forgot">忘记密码？</span>
           </el-form-item>
 
@@ -89,21 +87,21 @@ const userStore = useUserStore()
 
 const formRef = ref<FormInstance>()
 const loading = ref(false)
-const rememberPwd = ref(false)
+const rememberUsername = ref(false)
 
 const form = reactive({
   username: localStorage.getItem('remember_username') || '',
-  password: localStorage.getItem('remember_password') || ''
+  password: ''
 })
 
 if (form.username) {
-  rememberPwd.value = true
+  rememberUsername.value = true
 }
 
 const rules: FormRules = {
   username: [
     { required: true, message: '请输入用户名', trigger: 'blur' },
-    { min: 3, max: 20, message: '用户名长度为3-20个字符', trigger: 'blur' }
+    { min: 3, max: 50, message: '用户名长度为3-50个字符', trigger: 'blur' }
   ],
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' },
@@ -112,21 +110,21 @@ const rules: FormRules = {
 }
 
 const handleLogin = async () => {
-  if (!formRef.value) return
+  if (!formRef.value || loading.value) return
 
   await formRef.value.validate(async (valid) => {
     if (!valid) return
 
-    loading.value = true
+      loading.value = true
     try {
-      await userStore.login(form.username, form.password)
+      const username = form.username.trim()
+      await userStore.login(username, form.password)
 
-      if (rememberPwd.value) {
-        localStorage.setItem('remember_username', form.username)
-        localStorage.setItem('remember_password', form.password)
+      localStorage.removeItem('remember_password')
+      if (rememberUsername.value) {
+        localStorage.setItem('remember_username', username)
       } else {
         localStorage.removeItem('remember_username')
-        localStorage.removeItem('remember_password')
       }
 
       ElMessage.success('登录成功')

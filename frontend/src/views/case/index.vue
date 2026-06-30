@@ -132,6 +132,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { getCasePage, getAllTags, likeCase, unlikeCase } from '@/api/case'
 
 const router = useRouter()
@@ -162,10 +163,11 @@ const fetchCases = async () => {
       tagId: selectedTagId.value || undefined,
       keyword: searchKeyword.value || undefined
     })
-    caseList.value = res.data.records ?? []
-    pagination.value.total = res.data.total ?? 0
+    caseList.value = res.records ?? []
+    pagination.value.total = res.total ?? 0
   } catch (error) {
     console.error('获取案例列表失败:', error)
+    ElMessage.error('获取案例列表失败')
   } finally {
     loading.value = false
   }
@@ -174,9 +176,10 @@ const fetchCases = async () => {
 const fetchTags = async () => {
   try {
     const res = await getAllTags()
-    tags.value = res.data ?? []
+    tags.value = res ?? []
   } catch (error) {
     console.error('获取标签失败:', error)
+    ElMessage.error('获取标签失败')
   }
 }
 
@@ -201,7 +204,7 @@ const handleLike = async (caseItem: any) => {
     if (caseItem.isLiked) {
       await unlikeCase(caseItem.id)
       caseItem.isLiked = false
-      caseItem.likeCount--
+      caseItem.likeCount = Math.max(0, caseItem.likeCount - 1)
     } else {
       await likeCase(caseItem.id)
       caseItem.isLiked = true
@@ -209,6 +212,7 @@ const handleLike = async (caseItem: any) => {
     }
   } catch (error) {
     console.error('点赞操作失败:', error)
+    ElMessage.error('点赞失败，请先登录后再操作')
   }
 }
 

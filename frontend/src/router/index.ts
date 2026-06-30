@@ -178,7 +178,7 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach(async (to, from, next) => {
+router.beforeEach(async (to, _from, next) => {
   NProgress.start()
 
   document.title = `${to.meta.title || '反诈骗学习平台'} - 反诈骗学习平台`

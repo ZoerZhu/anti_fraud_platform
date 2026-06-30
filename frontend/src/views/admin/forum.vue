@@ -346,8 +346,8 @@ const loadPosts = async () => {
       keyword: keyword.value || undefined,
       postType: typeFilter.value || undefined
     })
-    postList.value = res.data.records
-    total.value = res.data.total
+    postList.value = res.records
+    total.value = res.total
   } catch {
     ElMessage.error('加载帖子失败')
   } finally {
@@ -401,7 +401,7 @@ const loadComments = async () => {
   loadingComments.value = true
   try {
     const res = await getPostComments(selectedPost.value.id)
-    comments.value = res.data
+    comments.value = res
   } catch {
     ElMessage.error('加载评论失败')
   } finally {

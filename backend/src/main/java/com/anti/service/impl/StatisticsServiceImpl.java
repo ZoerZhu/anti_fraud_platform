@@ -10,7 +10,6 @@ import com.anti.mapper.FraudCaseMapper;
 import com.anti.mapper.NewsMapper;
 import com.anti.mapper.UserChallengeRecordMapper;
 import com.anti.service.StatisticsService;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -45,9 +44,6 @@ public class StatisticsServiceImpl implements StatisticsService {
     @Autowired
     private UserChallengeRecordMapper userChallengeRecordMapper;
 
-    @Autowired
-    private ObjectMapper objectMapper;
-
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
     @Override
@@ -55,7 +51,6 @@ public class StatisticsServiceImpl implements StatisticsService {
         DashboardVO dashboard = new DashboardVO();
 
         LocalDate today = LocalDate.now();
-        LocalDate weekAgo = today.minusDays(7);
 
         try {
             DailyStatistics todayStat = dailyStatisticsMapper.selectToday();
@@ -93,22 +88,12 @@ public class StatisticsServiceImpl implements StatisticsService {
             dashboard.setTotalCases(0);
         }
 
-        long totalNewUsers = 0;
         try {
-            List<Map<String, Object>> newUsersResult = statisticsQueryMapper.selectNewUsersDaily(
-                    weekAgo.format(DATE_FORMATTER), today.plusDays(1).format(DATE_FORMATTER));
-            if (newUsersResult != null && !newUsersResult.isEmpty()) {
-                totalNewUsers = newUsersResult.stream()
-                        .filter(Objects::nonNull)
-                        .mapToLong(m -> {
-                            Object val = m.get("new_users");
-                            return val != null ? ((Number) val).longValue() : 0L;
-                        }).sum();
-            }
+            Long totalStudents = statisticsQueryMapper.selectTotalStudents();
+            dashboard.setTotalUsers(totalStudents != null ? totalStudents.intValue() : 0);
         } catch (Exception e) {
-            // Ignore query errors, keep totalNewUsers as 0
+            dashboard.setTotalUsers(0);
         }
-        dashboard.setTotalUsers((int) totalNewUsers);
 
         dashboard.setVisitTrend(getVisitTrend(7));
         dashboard.setFraudTypeDist(getFraudTypeDistribution());
@@ -122,8 +107,9 @@ public class StatisticsServiceImpl implements StatisticsService {
     @Override
     public VisitTrendVO getVisitTrend(int days) {
         VisitTrendVO trend = new VisitTrendVO();
+        int safeDays = Math.max(1, Math.min(days, 90));
         LocalDate endDate = LocalDate.now();
-        LocalDate startDate = endDate.minusDays(days - 1);
+        LocalDate startDate = endDate.minusDays(safeDays - 1);
 
         List<DailyStatistics> stats = new ArrayList<>();
         try {
@@ -133,21 +119,30 @@ public class StatisticsServiceImpl implements StatisticsService {
         }
 
         if (stats == null || stats.isEmpty()) {
-            stats = generateMockVisitTrend(days);
+            trend.setDates(new ArrayList<>());
+            trend.setPageViews(new ArrayList<>());
+            trend.setActiveUsers(new ArrayList<>());
+            trend.setNewUsers(new ArrayList<>());
+            return trend;
         }
+
+        Map<LocalDate, DailyStatistics> statMap = stats.stream()
+                .filter(Objects::nonNull)
+                .filter(stat -> stat.getStatDate() != null)
+                .collect(Collectors.toMap(DailyStatistics::getStatDate, stat -> stat, (first, second) -> first));
 
         List<String> dates = new ArrayList<>();
         List<Integer> pageViews = new ArrayList<>();
         List<Integer> activeUsers = new ArrayList<>();
         List<Integer> newUsers = new ArrayList<>();
 
-        for (DailyStatistics stat : stats) {
-            if (stat != null && stat.getStatDate() != null) {
-                dates.add(stat.getStatDate().format(DATE_FORMATTER));
-                pageViews.add(stat.getTotalPageViews() != null ? stat.getTotalPageViews() : 0);
-                activeUsers.add(stat.getDailyActiveUsers() != null ? stat.getDailyActiveUsers() : 0);
-                newUsers.add(stat.getNewUsers() != null ? stat.getNewUsers() : 0);
-            }
+        for (int i = 0; i < safeDays; i++) {
+            LocalDate date = startDate.plusDays(i);
+            DailyStatistics stat = statMap.get(date);
+            dates.add(date.format(DATE_FORMATTER));
+            pageViews.add(stat != null && stat.getTotalPageViews() != null ? stat.getTotalPageViews() : 0);
+            activeUsers.add(stat != null && stat.getDailyActiveUsers() != null ? stat.getDailyActiveUsers() : 0);
+            newUsers.add(stat != null && stat.getNewUsers() != null ? stat.getNewUsers() : 0);
         }
 
         trend.setDates(dates);
@@ -168,15 +163,17 @@ public class StatisticsServiceImpl implements StatisticsService {
         List<Map<String, Object>> typeViews;
         try {
             typeViews = statisticsQueryMapper.selectCaseTypeViews(
-                    weekAgo.atStartOfDay().toString(),
-                    today.plusDays(1).atStartOfDay().toString()
+                    weekAgo.format(DATE_FORMATTER) + " 00:00:00",
+                    today.plusDays(1).format(DATE_FORMATTER) + " 00:00:00"
             );
         } catch (Exception e) {
             typeViews = new ArrayList<>();
         }
 
         if (typeViews == null || typeViews.isEmpty()) {
-            typeViews = generateMockFraudTypes();
+            dist.setTypes(new ArrayList<>());
+            dist.setCounts(new ArrayList<>());
+            return dist;
         }
 
         List<String> types = new ArrayList<>();
@@ -199,18 +196,15 @@ public class StatisticsServiceImpl implements StatisticsService {
 
     @Override
     public List<Map<String, Object>> getTopFraudTypes(int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 50));
         List<Map<String, Object>> topTypes;
         try {
-            topTypes = statisticsQueryMapper.selectTopFraudTypes(limit);
+            topTypes = statisticsQueryMapper.selectTopFraudTypes(safeLimit);
         } catch (Exception e) {
             topTypes = new ArrayList<>();
         }
 
-        if (topTypes == null || topTypes.isEmpty()) {
-            topTypes = generateMockTopFraudTypes(limit);
-        }
-
-        return topTypes.stream()
+        return (topTypes == null ? new ArrayList<Map<String, Object>>() : topTypes).stream()
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
     }
@@ -226,14 +220,18 @@ public class StatisticsServiceImpl implements StatisticsService {
         try {
             deptScores = statisticsQueryMapper.selectDepartmentScores(
                     weekAgo.format(DATE_FORMATTER),
-                    today.format(DATE_FORMATTER)
+                    today.plusDays(1).format(DATE_FORMATTER)
             );
         } catch (Exception e) {
             deptScores = new ArrayList<>();
         }
 
         if (deptScores == null || deptScores.isEmpty()) {
-            deptScores = generateMockDepartmentScores();
+            deptScore.setDepartments(new ArrayList<>());
+            deptScore.setAvgScores(new ArrayList<>());
+            deptScore.setUserCounts(new ArrayList<>());
+            deptScore.setCompletionRates(new ArrayList<>());
+            return deptScore;
         }
 
         List<String> departments = new ArrayList<>();
@@ -245,7 +243,7 @@ public class StatisticsServiceImpl implements StatisticsService {
             if (item == null) continue;
             String grade = item.get("grade") != null ? item.get("grade").toString() : "";
             String major = item.get("major") != null ? item.get("major").toString() : "";
-            departments.add(grade + (major.isEmpty() ? "" : "-" + major));
+            departments.add(formatDepartmentLabel(grade, major));
             Object avgScoreObj = item.get("avg_score");
             avgScores.add(avgScoreObj != null ?
                     new BigDecimal(avgScoreObj.toString()).setScale(1, RoundingMode.HALF_UP) :
@@ -253,7 +251,10 @@ public class StatisticsServiceImpl implements StatisticsService {
             Object userCountObj = item.get("user_count");
             userCounts.add(userCountObj != null ?
                     ((Number) userCountObj).intValue() : 0);
-            completionRates.add(BigDecimal.valueOf(75.5));
+            Object completionRateObj = item.get("completion_rate");
+            completionRates.add(completionRateObj != null ?
+                    new BigDecimal(completionRateObj.toString()).setScale(1, RoundingMode.HALF_UP) :
+                    BigDecimal.ZERO);
         }
 
         deptScore.setDepartments(departments);
@@ -275,18 +276,15 @@ public class StatisticsServiceImpl implements StatisticsService {
 
     @Override
     public List<TopCaseVO> getTopCases(int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 50));
         List<Map<String, Object>> topMaps;
         try {
-            topMaps = statisticsQueryMapper.selectTopCases(limit);
+            topMaps = statisticsQueryMapper.selectTopCases(safeLimit);
         } catch (Exception e) {
             topMaps = new ArrayList<>();
         }
 
-        if (topMaps == null || topMaps.isEmpty()) {
-            topMaps = generateMockTopCases(limit);
-        }
-
-        return topMaps.stream()
+        return (topMaps == null ? new ArrayList<Map<String, Object>>() : topMaps).stream()
                 .filter(Objects::nonNull)
                 .map(m -> {
             TopCaseVO vo = new TopCaseVO();
@@ -313,11 +311,7 @@ public class StatisticsServiceImpl implements StatisticsService {
             hourlyData = new ArrayList<>();
         }
 
-        if (hourlyData == null || hourlyData.isEmpty()) {
-            hourlyData = generateMockHourlyActivity();
-        }
-
-        return hourlyData.stream()
+        return (hourlyData == null ? new ArrayList<Map<String, Object>>() : hourlyData).stream()
                 .filter(Objects::nonNull)
                 .map(m -> {
             HourlyActivityVO vo = new HourlyActivityVO();
@@ -404,9 +398,30 @@ public class StatisticsServiceImpl implements StatisticsService {
             // Ignore query errors
         }
         stat.setChallengeCompletions(challengeCompletions);
-        stat.setAvgTestScore(BigDecimal.valueOf(75.0));
-        stat.setNewPosts(0);
-        stat.setNewComments(0);
+
+        BigDecimal avgScore = BigDecimal.ZERO;
+        try {
+            avgScore = statisticsQueryMapper.selectAverageChallengeScore(dateStr, nextDateStr);
+        } catch (Exception e) {
+            // Ignore query errors
+        }
+        stat.setAvgTestScore(avgScore != null ? avgScore.setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO);
+
+        Integer newPosts = 0;
+        try {
+            newPosts = statisticsQueryMapper.selectNewPosts(dateStr);
+        } catch (Exception e) {
+            // Ignore query errors
+        }
+        stat.setNewPosts(newPosts != null ? newPosts : 0);
+
+        Integer newComments = 0;
+        try {
+            newComments = statisticsQueryMapper.selectNewComments(dateStr);
+        } catch (Exception e) {
+            // Ignore query errors
+        }
+        stat.setNewComments(newComments != null ? newComments : 0);
 
         return stat;
     }
@@ -416,7 +431,7 @@ public class StatisticsServiceImpl implements StatisticsService {
         try {
             deptScores = statisticsQueryMapper.selectDepartmentScores(
                     date.format(DATE_FORMATTER),
-                    date.format(DATE_FORMATTER)
+                    date.plusDays(1).format(DATE_FORMATTER)
             );
         } catch (Exception e) {
             return;
@@ -424,6 +439,13 @@ public class StatisticsServiceImpl implements StatisticsService {
 
         if (deptScores == null || deptScores.isEmpty()) {
             return;
+        }
+
+        List<DepartmentStatistics> existing = new ArrayList<>();
+        try {
+            existing = departmentStatisticsMapper.selectByStatDate(date);
+        } catch (Exception e) {
+            existing = new ArrayList<>();
         }
 
         for (Map<String, Object> dept : deptScores) {
@@ -435,19 +457,16 @@ public class StatisticsServiceImpl implements StatisticsService {
             Object userCountObj = dept.get("user_count");
             ds.setUserCount(userCountObj != null ? ((Number) userCountObj).intValue() : 0);
             Object avgScoreObj = dept.get("avg_score");
-            ds.setAvgTestScore(avgScoreObj != null ?
+            BigDecimal avgTestScore = avgScoreObj != null ?
                     new BigDecimal(avgScoreObj.toString()).setScale(2, RoundingMode.HALF_UP) :
+                    BigDecimal.ZERO;
+            ds.setAvgTestScore(avgTestScore);
+            ds.setAvgKnowledgeLevel(avgTestScore);
+            Object completionRateObj = dept.get("completion_rate");
+            ds.setCompletionRate(completionRateObj != null ?
+                    new BigDecimal(completionRateObj.toString()).setScale(2, RoundingMode.HALF_UP) :
                     BigDecimal.ZERO);
-            ds.setAvgKnowledgeLevel(BigDecimal.valueOf(60.0));
-            ds.setCompletionRate(BigDecimal.valueOf(0.75));
 
-            List<DepartmentStatistics> existing = new ArrayList<>();
-            try {
-                existing = departmentStatisticsMapper.selectByStatDate(date);
-            } catch (Exception e) {
-                // Ignore
-            }
-            
             if (existing != null) {
                 Optional<DepartmentStatistics> match = existing.stream()
                         .filter(Objects::nonNull)
@@ -467,96 +486,9 @@ public class StatisticsServiceImpl implements StatisticsService {
         }
     }
 
-    private List<DailyStatistics> generateMockVisitTrend(int days) {
-        List<DailyStatistics> mock = new ArrayList<>();
-        Random random = new Random();
-        for (int i = days - 1; i >= 0; i--) {
-            DailyStatistics stat = new DailyStatistics();
-            stat.setStatDate(LocalDate.now().minusDays(i));
-            stat.setTotalPageViews(100 + random.nextInt(200));
-            stat.setDailyActiveUsers(50 + random.nextInt(100));
-            stat.setNewUsers(5 + random.nextInt(20));
-            mock.add(stat);
-        }
-        return mock;
-    }
-
-    private List<Map<String, Object>> generateMockFraudTypes() {
-        List<Map<String, Object>> mock = new ArrayList<>();
-        mock.add(createMap("刷单诈骗", 325));
-        mock.add(createMap("杀猪盘", 278));
-        mock.add(createMap("冒充客服", 198));
-        mock.add(createMap("网络贷款", 156));
-        mock.add(createMap("冒充公检法", 134));
-        mock.add(createMap("游戏交易", 98));
-        return mock;
-    }
-
-    private List<Map<String, Object>> generateMockTopFraudTypes(int limit) {
-        List<Map<String, Object>> mock = new ArrayList<>();
-        mock.add(createMap("刷单诈骗", 325));
-        mock.add(createMap("杀猪盘", 278));
-        mock.add(createMap("冒充客服", 198));
-        return mock.subList(0, Math.min(limit, mock.size()));
-    }
-
-    private List<Map<String, Object>> generateMockDepartmentScores() {
-        List<Map<String, Object>> mock = new ArrayList<>();
-        mock.add(createMapWithScore("计算机学院", "软件工程", 82.5, 156, 78.5));
-        mock.add(createMapWithScore("计算机学院", "计算机科学", 85.2, 203, 82.3));
-        mock.add(createMapWithScore("经济管理学院", "金融学", 78.6, 189, 72.1));
-        mock.add(createMapWithScore("经济管理学院", "会计学", 76.3, 145, 68.9));
-        mock.add(createMapWithScore("机械工程学院", "机械设计", 73.8, 167, 65.4));
-        mock.add(createMapWithScore("文学院", "汉语言文学", 81.2, 98, 75.8));
-        return mock;
-    }
-
-    private List<Map<String, Object>> generateMockTopCases(int limit) {
-        List<Map<String, Object>> mock = new ArrayList<>();
-        mock.add(createMapWithCase(1L, "刷单返利连环套，大学生被骗2万元", "刷单诈骗", 1256, 89));
-        mock.add(createMapWithCase(2L, "杀猪盘情感诈骗全过程曝光", "杀猪盘", 1089, 76));
-        mock.add(createMapWithCase(3L, "警惕！冒充客服诈骗新套路", "冒充客服", 956, 67));
-        mock.add(createMapWithCase(4L, "网络贷款注销陷阱深度解析", "网络贷款", 823, 54));
-        mock.add(createMapWithCase(5L, "游戏装备交易惨遭黑心商家", "游戏交易", 756, 45));
-        return mock.subList(0, Math.min(limit, mock.size()));
-    }
-
-    private List<Map<String, Object>> generateMockHourlyActivity() {
-        List<Map<String, Object>> mock = new ArrayList<>();
-        Random random = new Random();
-        for (int hour = 0; hour < 24; hour++) {
-            int baseCount = (hour >= 8 && hour <= 22) ? 50 : 10;
-            mock.add(createMap("hour", hour));
-            Map<String, Object> last = mock.get(mock.size() - 1);
-            last.put("count", baseCount + random.nextInt(30));
-        }
-        return mock;
-    }
-
-    private Map<String, Object> createMap(String key, Object value) {
-        Map<String, Object> map = new HashMap<>();
-        map.put(key, value);
-        return map;
-    }
-
-    private Map<String, Object> createMapWithScore(String grade, String major, double avgScore, int userCount, double rate) {
-        Map<String, Object> map = new HashMap<>();
-        map.put("grade", grade);
-        map.put("major", major);
-        map.put("avg_score", avgScore);
-        map.put("user_count", userCount);
-        map.put("completion_rate", rate);
-        return map;
-    }
-
-    private Map<String, Object> createMapWithCase(Long id, String title, String type, int views, int likes) {
-        Map<String, Object> map = new HashMap<>();
-        map.put("id", id);
-        map.put("title", title);
-        map.put("case_type", type);
-        map.put("view_count", views);
-        map.put("like_count", likes);
-        map.put("hot_score", views + likes * 2);
-        return map;
+    private String formatDepartmentLabel(String grade, String major) {
+        String safeGrade = grade == null || grade.isBlank() ? "未分组" : grade;
+        String safeMajor = major == null || major.isBlank() ? "" : major;
+        return safeMajor.isEmpty() ? safeGrade : safeGrade + "-" + safeMajor;
     }
 }

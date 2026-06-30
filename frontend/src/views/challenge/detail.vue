@@ -46,7 +46,7 @@
         <div class="question-card" v-if="currentQuestion">
           <div class="question__type">
             <el-tag size="small" :type="currentQuestion.questionType === 'single' ? 'primary' : 'warning'">
-              {{ currentQuestion.questionType === 'single' ? '单选题' : '多选题' }}
+              {{ getQuestionTypeName(currentQuestion.questionType) }}
             </el-tag>
             <span class="question__score">{{ currentQuestion.score }}分</span>
           </div>
@@ -123,6 +123,31 @@
           <el-button @click="handleRetry" plain>再试一次</el-button>
           <el-button type="primary" @click="handleBack">返回关卡</el-button>
         </div>
+
+        <section class="review-section" v-if="result?.answerDetail?.answers?.length">
+          <h2 class="review-section__title">答题复盘</h2>
+          <div class="review-list">
+            <div
+              v-for="(answer, idx) in result.answerDetail.answers"
+              :key="answer.questionId"
+              class="review-item"
+              :class="{ 'review-item--correct': answer.correct, 'review-item--wrong': !answer.correct }"
+            >
+              <div class="review-item__header">
+                <span class="review-item__index">第 {{ idx + 1 }} 题</span>
+                <el-tag size="small" :type="answer.correct ? 'success' : 'danger'">
+                  {{ answer.correct ? '正确' : '需复习' }}
+                </el-tag>
+                <span class="review-item__score">{{ answer.score }}分</span>
+              </div>
+              <p class="review-item__question">{{ getQuestionText(answer.questionId) }}</p>
+              <div class="review-item__answers">
+                <span>你的选择：{{ formatAnswer(answer.questionId, answer.selectedIndexes) }}</span>
+                <span>正确答案：{{ formatAnswer(answer.questionId, answer.correctIndexes) }}</span>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   </div>
@@ -162,6 +187,38 @@ const isOptionSelected = (optIdx: number) => {
   return userAnswers.value[qId]?.includes(optIdx) || false
 }
 
+const getQuestionTypeName = (type: string) => {
+  const map: Record<string, string> = {
+    single: '单选题',
+    multiple: '多选题',
+    truefalse: '判断题'
+  }
+  return map[type] || '题目'
+}
+
+const getQuestionText = (questionId: string) => {
+  return questions.value.find(q => q.id === questionId)?.text || questionId
+}
+
+const formatAnswer = (questionId: string, indexes: number[] = []) => {
+  const question = questions.value.find(q => q.id === questionId)
+  if (!question || !indexes.length) return '未作答'
+  return indexes
+    .map(index => {
+      const option = question.options[index]
+      if (!option) return `选项${index + 1}`
+      return `${option.label || String.fromCharCode(65 + index)}. ${option.text}`
+    })
+    .join('；')
+}
+
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+  return fallback
+}
+
 const handleOptionClick = (optIdx: number) => {
   if (!currentQuestion.value || submitted.value) return
   const qId = currentQuestion.value.id
@@ -199,9 +256,12 @@ const handleNext = () => {
 
 const handleSubmit = async () => {
   if (!currentQuestion.value) return
-  const qId = currentQuestion.value.id
-  if (!userAnswers.value[qId]?.length) {
-    ElMessage.warning('请选择答案后再提交')
+  if (submitting.value) return
+
+  const firstUnansweredIndex = questions.value.findIndex(q => !userAnswers.value[q.id]?.length)
+  if (firstUnansweredIndex >= 0) {
+    currentIndex.value = firstUnansweredIndex
+    ElMessage.warning(`第 ${firstUnansweredIndex + 1} 题尚未作答`)
     return
   }
 
@@ -213,7 +273,7 @@ const handleSubmit = async () => {
       answers: userAnswers.value,
       startTime: startTime.value
     })
-    result.value = res.data
+    result.value = res
     submitted.value = true
 
     if (result.value.passed) {
@@ -227,8 +287,8 @@ const handleSubmit = async () => {
     } else {
       ElMessage.info('未达及格线，再接再厉！')
     }
-  } catch {
-    ElMessage.error('提交失败，请重试')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '提交失败，请重试'))
   } finally {
     submitting.value = false
   }
@@ -251,7 +311,7 @@ const fetchChallenge = async () => {
   try {
     const challengeId = Number(route.params.id)
     const res = await getChallengeDetail(challengeId)
-    challenge.value = res.data
+    challenge.value = res
 
     if (challenge.value?.content?.questions) {
       questions.value = challenge.value.content.questions
@@ -262,8 +322,8 @@ const fetchChallenge = async () => {
         userAnswers.value[q.id] = []
       }
     })
-  } catch {
-    ElMessage.error('加载关卡失败')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '加载关卡失败'))
     router.push('/challenge')
   } finally {
     pageLoading.value = false
@@ -629,6 +689,74 @@ onMounted(() => {
   display: flex;
   justify-content: center;
   gap: 16px;
+}
+
+.review-section {
+  margin-top: 32px;
+  text-align: left;
+
+  &__title {
+    margin: 0 0 16px;
+    color: var(--text-primary);
+    font-size: 1.15rem;
+    font-weight: 700;
+  }
+}
+
+.review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.review-item {
+  padding: 18px;
+  background: var(--bg-card);
+  border: 1px solid hsl(220, 15%, 90%);
+  border-left: 4px solid var(--warning);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+
+  &--correct {
+    border-left-color: var(--success);
+  }
+
+  &--wrong {
+    border-left-color: var(--danger);
+  }
+
+  &__header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  &__index {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+  }
+
+  &__score {
+    margin-left: auto;
+    color: var(--primary);
+    font-weight: 700;
+  }
+
+  &__question {
+    margin: 0 0 12px;
+    color: var(--text-primary);
+    font-weight: 600;
+    line-height: 1.6;
+  }
+
+  &__answers {
+    display: grid;
+    gap: 8px;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
 }
 
 @media (max-width: 768px) {

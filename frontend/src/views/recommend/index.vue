@@ -61,14 +61,16 @@
       <el-empty
         v-else-if="!loading"
         class="recommend-page__empty"
-        description="暂无推荐，可先浏览案例、阅读资讯或完成闯关，系统会更新您的画像后再推荐"
-      />
+        :description="emptyDescription"
+      >
+        <el-button v-if="errorMessage" type="primary" plain @click="loadList">重新加载</el-button>
+      </el-empty>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   getRecommendationList,
@@ -88,6 +90,11 @@ const activeTab = ref<'case' | 'news' | 'challenge'>('case')
 const loading = ref(false)
 const list = ref<RecommendationVO[]>([])
 const interest = ref<UserInterestVO | null>(null)
+const errorMessage = ref('')
+
+const emptyDescription = computed(() => {
+  return errorMessage.value || '暂无推荐，可先浏览案例、阅读资讯或完成闯关，系统会更新您的画像后再推荐'
+})
 
 const typeLabel = (t: string) => {
   const m: Record<string, string> = { case: '案例', news: '资讯', challenge: '闯关' }
@@ -125,7 +132,7 @@ const snippet = (text?: string) => {
 const loadInterest = async () => {
   try {
     const res = await getUserInterest()
-    interest.value = res.data ?? null
+    interest.value = res ?? null
   } catch {
     interest.value = null
   }
@@ -133,14 +140,24 @@ const loadInterest = async () => {
 
 const loadList = async () => {
   loading.value = true
+  errorMessage.value = ''
   try {
     const res = await getRecommendationList({ limit: 12, itemType: activeTab.value })
-    list.value = Array.isArray(res.data) ? res.data : []
+    list.value = Array.isArray(res) ? res : []
   } catch {
     list.value = []
+    errorMessage.value = '推荐加载失败，请稍后重试'
   } finally {
     loading.value = false
   }
+}
+
+const isScenarioRecommendation = (item: RecommendationVO) => {
+  return item.itemType === 'challenge'
+    && (
+      item.tags?.some((tag) => tag.includes('情景')) ||
+      item.reasons?.some((reason) => reason.includes('情景'))
+    )
 }
 
 const onCardClick = (item: RecommendationVO) => {
@@ -151,6 +168,10 @@ const onCardClick = (item: RecommendationVO) => {
     return
   }
   if (item.itemType === 'challenge') {
+    if (isScenarioRecommendation(item)) {
+      router.push(`/challenge/scenario/${id}`)
+      return
+    }
     router.push(`/challenge/${id}`)
     return
   }

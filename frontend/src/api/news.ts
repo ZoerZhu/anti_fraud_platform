@@ -1,4 +1,4 @@
-import request from '@/utils/request'
+import { del, get, post } from '@/utils/request'
 
 export interface News {
   id: number
@@ -43,29 +43,33 @@ export const getNewsPage = (params: {
   newsType?: string
   keyword?: string
 }) => {
-  return request.get<{ data: PageResult<News> }>('/news/page', { params })
+  return get<PageResult<News>>('/news/page', { params })
+}
+
+export const getRequiredNews = (limit: number = 3) => {
+  return get<News[]>('/news/required', { params: { limit } })
 }
 
 export const getNewsDetail = (id: number) => {
-  return request.get<{ data: News }>(`/news/${id}`)
+  return get<News>(`/news/${id}`)
 }
 
 export const likeNews = (id: number) => {
-  return request.post<{ data: boolean }>(`/news/${id}/like`)
+  return post<boolean>(`/news/${id}/like`)
 }
 
 export const unlikeNews = (id: number) => {
-  return request.delete<{ data: boolean }>(`/news/${id}/like`)
+  return del<boolean>(`/news/${id}/like`)
 }
 
 export const viewNews = (id: number, stayDuration?: number) => {
-  return request.post(`/news/${id}/view`, { stayDuration })
+  return post<void>(`/news/${id}/view`, { stayDuration })
 }
 
 export const getBrowseHistory = (params: { pageNum: number; pageSize: number }) => {
-  return request.get<{ data: PageResult<News> }>('/news/browse/history', { params })
+  return get<PageResult<News>>('/news/browse/history', { params })
 }
 
 export const getCategories = () => {
-  return request.get<{ data: NewsCategory[] }>('/news/category/list')
+  return get<NewsCategory[]>('/news/category/list')
 }

@@ -1,9 +1,11 @@
 package com.anti.controller;
 
+import com.anti.common.BusinessException;
 import com.anti.common.Result;
 import com.anti.entity.dto.CreateCommentRequest;
 import com.anti.entity.vo.CommentVO;
 import com.anti.service.CommentService;
+import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
@@ -25,9 +27,9 @@ public class CommentController {
      * 创建评论
      */
     @PostMapping
-    public Result<CommentVO> createComment(@RequestBody CreateCommentRequest request,
+    public Result<CommentVO> createComment(@Valid @RequestBody CreateCommentRequest request,
                                           @AuthenticationPrincipal UserDetails userDetails) {
-        Long userId = getUserId(userDetails);
+        Long userId = requireUserId(userDetails);
         CommentVO comment = commentService.createComment(request, userId);
         return Result.success(comment);
     }
@@ -38,7 +40,7 @@ public class CommentController {
     @DeleteMapping("/{commentId}")
     public Result<Void> deleteComment(@PathVariable Long commentId,
                                      @AuthenticationPrincipal UserDetails userDetails) {
-        Long userId = getUserId(userDetails);
+        Long userId = requireUserId(userDetails);
         commentService.deleteComment(commentId, userId);
         return Result.success();
     }
@@ -49,7 +51,7 @@ public class CommentController {
     @PostMapping("/{commentId}/like")
     public Result<Void> likeComment(@PathVariable Long commentId,
                                    @AuthenticationPrincipal UserDetails userDetails) {
-        Long userId = getUserId(userDetails);
+        Long userId = requireUserId(userDetails);
         commentService.likeComment(commentId, userId);
         return Result.success();
     }
@@ -60,7 +62,7 @@ public class CommentController {
     @DeleteMapping("/{commentId}/like")
     public Result<Void> unlikeComment(@PathVariable Long commentId,
                                      @AuthenticationPrincipal UserDetails userDetails) {
-        Long userId = getUserId(userDetails);
+        Long userId = requireUserId(userDetails);
         commentService.unlikeComment(commentId, userId);
         return Result.success();
     }
@@ -72,5 +74,13 @@ public class CommentController {
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    private Long requireUserId(UserDetails userDetails) {
+        Long userId = getUserId(userDetails);
+        if (userId == null) {
+            throw new BusinessException(401, "请先登录");
+        }
+        return userId;
     }
 }

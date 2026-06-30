@@ -28,6 +28,12 @@ public interface DailyStatisticsMapper extends BaseMapper<DailyStatistics> {
     List<DailyStatistics> selectRecentDays(@Param("startDate") LocalDate startDate);
 
     /**
+     * 按日期范围查询统计数据（闭区间）
+     */
+    @Select("SELECT * FROM daily_statistics WHERE stat_date >= #{startDate} AND stat_date <= #{endDate} ORDER BY stat_date ASC")
+    List<DailyStatistics> selectDateRange(@Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
+
+    /**
      * 查询最近N天的访问量趋势
      */
     @Select("SELECT stat_date, total_page_views, daily_active_users, new_users FROM daily_statistics " +

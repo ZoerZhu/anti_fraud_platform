@@ -29,7 +29,7 @@ export const useChallengeStore = defineStore('challenge', () => {
     loading.value = true
     try {
       const res = await getChallengeList()
-      challengeList.value = res.data || []
+      challengeList.value = res || []
     } finally {
       loading.value = false
     }
@@ -38,7 +38,7 @@ export const useChallengeStore = defineStore('challenge', () => {
   async function fetchProgress() {
     try {
       const res = await getChallengeProgress()
-      progress.value = res.data
+      progress.value = res
     } catch (error) {
       console.error('获取进度失败:', error)
     }
@@ -47,7 +47,7 @@ export const useChallengeStore = defineStore('challenge', () => {
   async function fetchRecords(pageNum: number = 1, pageSize: number = 10) {
     try {
       const res = await getChallengeRecords({ pageNum, pageSize })
-      records.value = res.data.records || []
+      records.value = res.records || []
     } catch (error) {
       console.error('获取记录失败:', error)
     }
@@ -56,7 +56,7 @@ export const useChallengeStore = defineStore('challenge', () => {
   async function fetchDailyRanking() {
     try {
       const res = await getDailyLeaderboard(20)
-      dailyRanking.value = res.data || []
+      dailyRanking.value = res || []
     } catch (error) {
       console.error('获取日榜失败:', error)
     }
@@ -65,7 +65,7 @@ export const useChallengeStore = defineStore('challenge', () => {
   async function fetchWeeklyRanking() {
     try {
       const res = await getWeeklyLeaderboard(20)
-      weeklyRanking.value = res.data || []
+      weeklyRanking.value = res || []
     } catch (error) {
       console.error('获取周榜失败:', error)
     }
@@ -74,7 +74,7 @@ export const useChallengeStore = defineStore('challenge', () => {
   async function fetchAllTimeRanking() {
     try {
       const res = await getAllTimeLeaderboard(20)
-      allTimeRanking.value = res.data || []
+      allTimeRanking.value = res || []
     } catch (error) {
       console.error('获取总榜失败:', error)
     }

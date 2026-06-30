@@ -1,11 +1,13 @@
 package com.anti.controller;
 
 import com.anti.common.Result;
+import com.anti.common.BusinessException;
 import com.anti.entity.dto.ScenarioDecisionRequest;
 import com.anti.entity.vo.ScenarioProgressVO;
-import com.anti.security.JwtUtils;
+import com.anti.security.LoginUser;
 import com.anti.service.ScenarioService;
-import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -16,11 +18,9 @@ import org.springframework.web.bind.annotation.*;
 public class ScenarioController {
 
     private final ScenarioService scenarioService;
-    private final JwtUtils jwtUtils;
 
-    public ScenarioController(ScenarioService scenarioService, JwtUtils jwtUtils) {
+    public ScenarioController(ScenarioService scenarioService) {
         this.scenarioService = scenarioService;
-        this.jwtUtils = jwtUtils;
     }
 
     /**
@@ -28,8 +28,8 @@ public class ScenarioController {
      */
     @PostMapping("/start/{challengeId}")
     public Result<ScenarioProgressVO> startScenario(@PathVariable Long challengeId,
-                                                     HttpServletRequest request) {
-        Long userId = getUserIdFromRequest(request);
+                                                    @AuthenticationPrincipal LoginUser loginUser) {
+        Long userId = requireLogin(loginUser);
         return Result.success(scenarioService.startScenario(challengeId, userId));
     }
 
@@ -38,8 +38,8 @@ public class ScenarioController {
      */
     @GetMapping("/progress/{challengeId}")
     public Result<ScenarioProgressVO> getProgress(@PathVariable Long challengeId,
-                                                  HttpServletRequest request) {
-        Long userId = getUserIdFromRequest(request);
+                                                  @AuthenticationPrincipal LoginUser loginUser) {
+        Long userId = requireLogin(loginUser);
         return Result.success(scenarioService.getProgress(challengeId, userId));
     }
 
@@ -47,9 +47,9 @@ public class ScenarioController {
      * 做出决策
      */
     @PostMapping("/decision")
-    public Result<ScenarioProgressVO> makeDecision(@RequestBody ScenarioDecisionRequest request,
-                                                    HttpServletRequest httpRequest) {
-        Long userId = getUserIdFromRequest(httpRequest);
+    public Result<ScenarioProgressVO> makeDecision(@Valid @RequestBody ScenarioDecisionRequest request,
+                                                   @AuthenticationPrincipal LoginUser loginUser) {
+        Long userId = requireLogin(loginUser);
         return Result.success(scenarioService.makeDecision(request, userId));
     }
 
@@ -58,8 +58,8 @@ public class ScenarioController {
      */
     @PostMapping("/reset/{challengeId}")
     public Result<Void> resetScenario(@PathVariable Long challengeId,
-                                       HttpServletRequest request) {
-        Long userId = getUserIdFromRequest(request);
+                                      @AuthenticationPrincipal LoginUser loginUser) {
+        Long userId = requireLogin(loginUser);
         scenarioService.resetScenario(challengeId, userId);
         return Result.success();
     }
@@ -69,17 +69,15 @@ public class ScenarioController {
      */
     @GetMapping("/ending/{challengeId}")
     public Result<ScenarioProgressVO> getEnding(@PathVariable Long challengeId,
-                                                  HttpServletRequest request) {
-        Long userId = getUserIdFromRequest(request);
+                                                @AuthenticationPrincipal LoginUser loginUser) {
+        Long userId = requireLogin(loginUser);
         return Result.success(scenarioService.getEnding(challengeId, userId));
     }
 
-    private Long getUserIdFromRequest(HttpServletRequest request) {
-        String token = request.getHeader("Authorization");
-        if (token != null && token.startsWith("Bearer ")) {
-            token = token.substring(7);
-            return jwtUtils.getUserIdFromToken(token);
+    private Long requireLogin(LoginUser loginUser) {
+        if (loginUser == null || loginUser.getUserId() == null) {
+            throw new BusinessException(401, "请先登录");
         }
-        return null;
+        return loginUser.getUserId();
     }
 }

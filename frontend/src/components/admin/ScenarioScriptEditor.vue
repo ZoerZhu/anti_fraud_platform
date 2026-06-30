@@ -38,6 +38,15 @@
       </el-radio-group>
     </div>
 
+    <div v-if="validationIssues.length" class="validation-panel">
+      <div class="validation-panel__title">校验未通过</div>
+      <div class="validation-panel__list">
+        <span v-for="issue in validationIssues" :key="issue" class="validation-panel__item">
+          {{ issue }}
+        </span>
+      </div>
+    </div>
+
     <div class="editor-content">
       <div v-show="activeTab === 'nodes'" class="nodes-panel">
         <div class="panel-header">
@@ -195,6 +204,7 @@
                 :class="{
                   'is-start': node.id === model.startNodeId,
                   'is-end': model.endNodeIds.includes(node.id),
+                  'is-unreachable': unreachableNodeIds.includes(node.id),
                   'node-type--start': node.type === 'start',
                   'node-type--dialog': node.type === 'dialog',
                   'node-type--decision': node.type === 'decision',
@@ -254,7 +264,7 @@
 import { ref, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
-import type { ScenarioScriptModel, ScenarioNode, ScenarioEdge } from '@/types/scenario-script'
+import type { ScenarioScriptModel } from '@/types/scenario-script'
 import { emptyScenarioScript, parseScenarioScriptJson } from '@/types/scenario-script'
 
 const model = defineModel<ScenarioScriptModel>({ required: true })
@@ -265,13 +275,103 @@ const jsonError = ref('')
 
 const endNodes = computed(() => model.value.nodes.filter(n => n.type === 'end'))
 
+const nodeIds = computed(() => model.value.nodes.map(n => n.id).filter(Boolean))
+
+const duplicateNodeIds = computed(() => {
+  const seen = new Set<string>()
+  const duplicates = new Set<string>()
+  for (const id of nodeIds.value) {
+    if (seen.has(id)) duplicates.add(id)
+    seen.add(id)
+  }
+  return [...duplicates]
+})
+
+const unreachableNodeIds = computed(() => {
+  if (!model.value.startNodeId) return []
+  const allNodeIds = new Set(nodeIds.value)
+  if (!allNodeIds.has(model.value.startNodeId)) return nodeIds.value
+
+  const adjacency = new Map<string, string[]>()
+  model.value.edges.forEach(edge => {
+    if (!edge.from || !edge.to || !allNodeIds.has(edge.from) || !allNodeIds.has(edge.to)) return
+    const list = adjacency.get(edge.from) || []
+    list.push(edge.to)
+    adjacency.set(edge.from, list)
+  })
+
+  const reachable = new Set<string>([model.value.startNodeId])
+  const queue = [model.value.startNodeId]
+  while (queue.length) {
+    const current = queue.shift()!
+    for (const next of adjacency.get(current) || []) {
+      if (!reachable.has(next)) {
+        reachable.add(next)
+        queue.push(next)
+      }
+    }
+  }
+  return nodeIds.value.filter(id => !reachable.has(id))
+})
+
+const validationIssues = computed(() => {
+  const issues: string[] = []
+  const allNodeIds = new Set(nodeIds.value)
+
+  if (!model.value.nodes.length) {
+    issues.push('至少需要1个节点')
+    return issues
+  }
+  if (model.value.nodes.some(n => !n.id?.trim())) {
+    issues.push('节点ID不能为空')
+  }
+  duplicateNodeIds.value.forEach(id => issues.push(`节点ID重复：${id}`))
+  if (!model.value.startNodeId) {
+    issues.push('必须设置起始节点')
+  } else if (!allNodeIds.has(model.value.startNodeId)) {
+    issues.push('起始节点不存在')
+  }
+  if (!model.value.endNodeIds.length) {
+    issues.push('至少需要1个结局节点')
+  }
+  model.value.endNodeIds.forEach(id => {
+    const node = model.value.nodes.find(n => n.id === id)
+    if (!node) {
+      issues.push(`结局节点不存在：${id}`)
+    } else if (node.type !== 'end') {
+      issues.push(`结局节点类型必须为结束：${id}`)
+    }
+  })
+
+  const outgoing = new Set<string>()
+  model.value.edges.forEach((edge, idx) => {
+    if (!edge.from || !edge.to) {
+      issues.push(`连接${idx + 1}缺少起点或终点`)
+      return
+    }
+    if (!allNodeIds.has(edge.from)) issues.push(`连接起点不存在：${edge.from}`)
+    if (!allNodeIds.has(edge.to)) issues.push(`连接终点不存在：${edge.to}`)
+    if (!edge.label?.trim()) issues.push(`连接选项文案不能为空：${edge.from}->${edge.to}`)
+    outgoing.add(edge.from)
+  })
+
+  model.value.nodes.forEach(node => {
+    if (!model.value.endNodeIds.includes(node.id) && !outgoing.has(node.id)) {
+      issues.push(`非结局节点必须有出边：${node.id}`)
+    }
+  })
+  unreachableNodeIds.value.forEach(id => issues.push(`起始节点不可达：${id}`))
+
+  return [...new Set(issues)]
+})
+
 const isNodeIdValid = (id: string) => {
   if (!id || !id.trim()) return false
   const count = model.value.nodes.filter(n => n.id === id).length
   return count === 1
 }
 
-const getTypeLabel = (t: string) => {
+const getTypeLabel = (t?: string) => {
   const m: Record<string, string> = {
     start: '开始',
     dialog: '对话',
@@ -279,35 +379,35 @@ const getTypeLabel = (t: string) => {
     result: '结果',
     end: '结束'
   }
-  return m[t] || t
+  return m[t ?? ''] || t || ''
 }
 
-const getRoleLabel = (r: string) => {
+const getRoleLabel = (r?: string) => {
   const m: Record<string, string> = {
     narrator: '旁白',
     scammer: '骗子',
     victim: '受害者'
   }
-  return m[r] || r
+  return m[r ?? ''] || r || ''
 }
 
-const getNodeTypeTag = (t: string) => {
+const getNodeTypeTag = (t?: string) => {
   const m: Record<string, string> = {
     start: 'success',
     dialog: 'primary',
     decision: 'warning',
     end: 'danger'
   }
-  return m[t] || 'info'
+  return m[t ?? ''] || 'info'
 }
 
-const getRoleTag = (r: string) => {
+const getRoleTag = (r?: string) => {
   const m: Record<string, string> = {
     narrator: 'info',
     scammer: 'danger',
     victim: 'primary'
   }
-  return m[r] || 'info'
+  return m[r ?? ''] || 'info'
 }
 
 watch(model, () => syncRawJsonFromModel(), { deep: true, immediate: true })
@@ -539,6 +639,35 @@ const handleTemplateSelect = async (command: string) => {
   border-bottom: 1px solid hsl(220, 15%, 90%);
 }
 
+.validation-panel {
+  padding: 10px 16px;
+  background: #fff7ed;
+  border-bottom: 1px solid #fed7aa;
+
+  &__title {
+    margin-bottom: 8px;
+    color: #9a3412;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  &__list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  &__item {
+    padding: 3px 8px;
+    color: #9a3412;
+    background: #ffedd5;
+    border: 1px solid #fed7aa;
+    border-radius: 999px;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+}
+
 .editor-content {
   min-height: 400px;
   max-height: 500px;
@@ -740,6 +869,11 @@ const handleTemplateSelect = async (command: string) => {
   &.is-end {
     border-color: #f56c6c;
     background: hsl(0, 65%, 95%);
+  }
+
+  &.is-unreachable {
+    border-style: dashed;
+    opacity: 0.62;
   }
 
   &.node-type--start { border-left: 4px solid #67c23a; }

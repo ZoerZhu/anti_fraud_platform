@@ -121,20 +121,20 @@ const fetchRanking = async () => {
     switch (activePeriod.value) {
       case 'daily':
         res = await getDailyLeaderboard(50)
-        rankingList.value = res.data || []
+        rankingList.value = res || []
         break
       case 'weekly':
         res = await getWeeklyLeaderboard(50)
-        rankingList.value = res.data || []
+        rankingList.value = res || []
         break
       case 'all':
         res = await getAllTimeLeaderboard(50)
-        rankingList.value = res.data || []
+        rankingList.value = res || []
         break
     }
 
     const userRankRes = await getUserRank(activePeriod.value)
-    currentUserRank.value = userRankRes.data
+    currentUserRank.value = userRankRes
   } catch {
     // 错误已由拦截器处理
   } finally {

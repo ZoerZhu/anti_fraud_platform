@@ -14,8 +14,8 @@
       <el-timeline>
         <el-timeline-item
           v-for="item in records"
-          :key="item.id"
-          :timestamp="item.time"
+          :key="item.recordKey || `${item.type}-${item.id}`"
+          :timestamp="formatRecordTime(item.time)"
           :color="getItemColor(item.type)"
           :icon="getItemIcon(item.type)"
           placement="top"
@@ -46,19 +46,33 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, type Component } from 'vue'
 import { get } from '@/utils/request'
+import { ElMessage } from 'element-plus'
 import { Trophy, Reading, Collection, ChatDotRound } from '@element-plus/icons-vue'
+import dayjs from 'dayjs'
 
-interface Record {
+interface LearningRecord {
+  recordKey?: string
   id: number
-  type: 'challenge' | 'case' | 'forum' | 'news'
+  type: 'challenge' | 'case' | 'forum' | 'news' | 'scenario'
+  targetId?: number
+  title?: string
   content: string
   time: string
+  meta?: Record<string, unknown>
+}
+
+interface LearningRecordPage {
+  records: LearningRecord[]
+  total: number
+  size: number
+  current: number
+  pages: number
 }
 
 const loading = ref(false)
-const records = ref<Record[]>([])
+const records = ref<LearningRecord[]>([])
 const currentPage = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
@@ -68,17 +82,19 @@ const getItemColor = (type: string) => {
     challenge: 'hsl(45, 90%, 55%)',
     case: 'hsl(200, 70%, 50%)',
     forum: 'hsl(280, 60%, 55%)',
-    news: 'hsl(150, 60%, 45%)'
+    news: 'hsl(150, 60%, 45%)',
+    scenario: 'hsl(10, 80%, 55%)'
   }
   return colors[type] || 'hsl(220, 10%, 50%)'
 }
 
 const getItemIcon = (type: string) => {
-  const icons: Record<string, any> = {
+  const icons: Record<string, Component> = {
     challenge: Trophy,
     case: Reading,
     forum: ChatDotRound,
-    news: Collection
+    news: Collection,
+    scenario: Trophy
   }
   return icons[type]
 }
@@ -88,15 +104,22 @@ const getTypeLabel = (type: string) => {
     challenge: '闯关',
     case: '案例',
     forum: '社区',
-    news: '资讯'
+    news: '资讯',
+    scenario: '情景'
   }
   return labels[type] || type
+}
+
+const formatRecordTime = (time?: string) => {
+  if (!time) return ''
+  const parsed = dayjs(time)
+  return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm') : time
 }
 
 const fetchRecords = async () => {
   loading.value = true
   try {
-    const res: any = await get('/learning/records', {
+    const res = await get<LearningRecordPage>('/learning/records', {
       params: {
         page: currentPage.value,
         size: pageSize.value
@@ -105,14 +128,9 @@ const fetchRecords = async () => {
     records.value = res.records || []
     total.value = res.total || 0
   } catch (error) {
-    records.value = [
-      { id: 1, type: 'challenge', content: '完成了"初识诈骗"闯关，获得50积分', time: '2026-03-20 14:30' },
-      { id: 2, type: 'case', content: '浏览了"刷单返利诈骗"案例', time: '2026-03-19 10:20' },
-      { id: 3, type: 'forum', content: '参与了"如何识别钓鱼网站"讨论', time: '2026-03-18 16:45' },
-      { id: 4, type: 'news', content: '阅读了"最新反诈预警"资讯', time: '2026-03-17 09:00' },
-      { id: 5, type: 'challenge', content: '完成了"情景模拟：快递诈骗"', time: '2026-03-16 20:15' }
-    ]
-    total.value = records.value.length
+    records.value = []
+    total.value = 0
+    ElMessage.warning('学习记录加载失败，请稍后重试')
   } finally {
     loading.value = false
   }
@@ -187,6 +205,10 @@ onMounted(() => {
 
     &--news {
       background: hsl(150, 60%, 45%);
+    }
+
+    &--scenario {
+      background: hsl(10, 80%, 55%);
     }
   }
 

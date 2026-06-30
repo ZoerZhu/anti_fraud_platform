@@ -3,6 +3,16 @@
     <div class="dashboard__header">
       <h2 class="dashboard__title">数据看板</h2>
       <div class="dashboard__actions">
+        <el-date-picker
+          v-model="exportDateRange"
+          class="dashboard__range"
+          type="daterange"
+          range-separator="至"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          value-format="YYYY-MM-DD"
+          unlink-panels
+        />
         <el-button type="primary" :loading="refreshLoading" @click="handleRefresh">
           <span class="btn-icon">&#8635;</span> 刷新数据
         </el-button>
@@ -125,14 +135,20 @@
             <el-radio-button :value="30">近30天</el-radio-button>
           </el-radio-group>
         </div>
-        <div ref="visitChartRef" class="chart-card__body"></div>
+        <div class="chart-card__body-wrap">
+          <div ref="visitChartRef" class="chart-card__body" :class="{ 'is-empty': !hasVisitTrendData }"></div>
+          <div v-if="!hasVisitTrendData" class="chart-card__empty">暂无数据</div>
+        </div>
       </div>
 
       <div class="chart-card">
         <div class="chart-card__header">
           <h3 class="chart-card__title">诈骗类型分布</h3>
         </div>
-        <div ref="pieChartRef" class="chart-card__body"></div>
+        <div class="chart-card__body-wrap">
+          <div ref="pieChartRef" class="chart-card__body" :class="{ 'is-empty': !hasFraudTypeData }"></div>
+          <div v-if="!hasFraudTypeData" class="chart-card__empty">暂无数据</div>
+        </div>
       </div>
     </div>
 
@@ -141,14 +157,20 @@
         <div class="chart-card__header">
           <h3 class="chart-card__title">各院系平均得分</h3>
         </div>
-        <div ref="barChartRef" class="chart-card__body"></div>
+        <div class="chart-card__body-wrap">
+          <div ref="barChartRef" class="chart-card__body" :class="{ 'is-empty': !hasDepartmentData }"></div>
+          <div v-if="!hasDepartmentData" class="chart-card__empty">暂无数据</div>
+        </div>
       </div>
 
       <div class="chart-card">
         <div class="chart-card__header">
           <h3 class="chart-card__title">用户活跃度(24小时)</h3>
         </div>
-        <div ref="heatmapChartRef" class="chart-card__body"></div>
+        <div class="chart-card__body-wrap">
+          <div ref="heatmapChartRef" class="chart-card__body" :class="{ 'is-empty': !hasHourlyData }"></div>
+          <div v-if="!hasHourlyData" class="chart-card__empty">暂无数据</div>
+        </div>
       </div>
     </div>
 
@@ -158,6 +180,9 @@
           <h3 class="chart-card__title">TOP案例排行榜</h3>
         </div>
         <el-table :data="dashboardData.topCases" stripe class="top-cases-table">
+          <template #empty>
+            <div class="top-cases-table__empty">暂无数据</div>
+          </template>
           <el-table-column type="index" label="排名" width="60" align="center">
             <template #default="{ $index }">
               <span class="rank-badge" :class="`rank-badge--${$index + 1}`">{{ $index + 1 }}</span>
@@ -196,25 +221,40 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
+import { computed, ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Loading } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
+import html2canvas from 'html2canvas'
+import { jsPDF } from 'jspdf'
 import {
   getDashboardData,
   getVisitTrend,
-  getFraudTypeDistribution,
-  getDepartmentScores,
-  getHourlyActivity,
   refreshStatistics,
   exportDailyStatistics,
   exportDepartmentStatistics
 } from '@/api/statistics'
-import type { DashboardVO, VisitTrendVO, FraudTypeDistVO, DepartmentScoreVO, HourlyActivityVO } from '@/api/statistics'
+import type { DashboardVO } from '@/api/statistics'
 
 const loading = ref(false)
 const refreshLoading = ref(false)
 const visitDays = ref(7)
+
+const formatDateValue = (date: Date) => {
+  const year = date.getFullYear()
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getDate()}`.padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const getDefaultExportRange = (): [string, string] => {
+  const end = new Date()
+  const start = new Date()
+  start.setDate(end.getDate() - 30)
+  return [formatDateValue(start), formatDateValue(end)]
+}
+
+const exportDateRange = ref<[string, string] | null>(getDefaultExportRange())
 
 const dashboardData = reactive<DashboardVO>({
   todayViews: 0,
@@ -241,6 +281,11 @@ let pieChart: echarts.ECharts | null = null
 let barChart: echarts.ECharts | null = null
 let heatmapChart: echarts.ECharts | null = null
 
+const hasVisitTrendData = computed(() => dashboardData.visitTrend.dates.length > 0)
+const hasFraudTypeData = computed(() => dashboardData.fraudTypeDist.types.length > 0)
+const hasDepartmentData = computed(() => dashboardData.departmentScores.departments.length > 0)
+const hasHourlyData = computed(() => dashboardData.hourlyActivity.length > 0)
+
 const formatNumber = (num: number): string => {
   if (num >= 10000) {
     return (num / 10000).toFixed(1) + 'w'
@@ -248,11 +293,22 @@ const formatNumber = (num: number): string => {
   return num.toLocaleString()
 }
 
+const escapeHtml = (value: unknown): string => {
+  const entities: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }
+  return String(value ?? '').replace(/[&<>"']/g, (char) => entities[char])
+}
+
 const fetchDashboard = async () => {
   loading.value = true
   try {
     const res = await getDashboardData()
-    Object.assign(dashboardData, res.data)
+    Object.assign(dashboardData, res)
     await nextTick()
     initAllCharts()
   } catch (error) {
@@ -265,7 +321,7 @@ const fetchDashboard = async () => {
 const fetchVisitTrend = async () => {
   try {
     const res = await getVisitTrend(visitDays.value)
-    dashboardData.visitTrend = res.data
+    dashboardData.visitTrend = res
     updateVisitChart()
   } catch (error) {
     console.error('获取访问趋势失败', error)
@@ -568,21 +624,24 @@ const handleRefresh = async () => {
 
 const handleExport = async (command: string) => {
   try {
+    const [startDate, endDate] = exportDateRange.value || getDefaultExportRange()
+    const exportParams = { startDate, endDate }
+    const rangeText = `${startDate} 至 ${endDate}`
     if (command === 'daily') {
-      await ElMessageBox.confirm('确定要导出每日统计数据吗？', '导出确认', {
+      await ElMessageBox.confirm(`确定要导出 ${rangeText} 的每日统计数据吗？`, '导出确认', {
         confirmButtonText: '确定',
         cancelButtonText: '取消',
         type: 'info'
       })
-      await exportDailyStatistics()
+      await exportDailyStatistics(exportParams)
       ElMessage.success('导出成功')
     } else {
-      await ElMessageBox.confirm('确定要导出院系统计数据吗？', '导出确认', {
+      await ElMessageBox.confirm(`确定要导出 ${rangeText} 的院系统计数据吗？`, '导出确认', {
         confirmButtonText: '确定',
         cancelButtonText: '取消',
         type: 'info'
       })
-      await exportDepartmentStatistics()
+      await exportDepartmentStatistics(exportParams)
       ElMessage.success('导出成功')
     }
   } catch (error) {
@@ -720,8 +779,8 @@ const handleExportPdf = async () => {
         ${dashboardData.topCases.map((c, i) => `
           <tr>
             <td style="padding: 12px; border: 1px solid #e8e8e8; text-align: center;">${i + 1}</td>
-            <td style="padding: 12px; border: 1px solid #e8e8e8; text-align: left;">${c.title}</td>
-            <td style="padding: 12px; border: 1px solid #e8e8e8; text-align: center;">${c.caseType}</td>
+            <td style="padding: 12px; border: 1px solid #e8e8e8; text-align: left;">${escapeHtml(c.title)}</td>
+            <td style="padding: 12px; border: 1px solid #e8e8e8; text-align: center;">${escapeHtml(c.caseType)}</td>
             <td style="padding: 12px; border: 1px solid #e8e8e8; text-align: center;">${formatNumber(c.viewCount)}</td>
             <td style="padding: 12px; border: 1px solid #e8e8e8; text-align: center;">${formatNumber(c.likeCount)}</td>
             <td style="padding: 12px; border: 1px solid #e8e8e8; text-align: center;">${formatNumber(c.hotScore)}</td>
@@ -733,70 +792,33 @@ const handleExportPdf = async () => {
 
     document.body.appendChild(container)
 
-    // 使用html2canvas生成图片，然后转PDF
-    const canvas = document.createElement('canvas')
-    const scale = 2
-    canvas.width = 1200 * scale
-    canvas.height = container.offsetHeight * scale
-    const ctx = canvas.getContext('2d')!
-    ctx.scale(scale, scale)
-    ctx.fillStyle = '#fff'
+    try {
+      const canvasEl = await html2canvas(container, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff'
+      })
 
-    const opt = {
-      scale: scale,
-      useCORS: true,
-      allowTaint: true,
-      backgroundColor: '#ffffff'
-    }
+      const imgData = canvasEl.toDataURL('image/png')
+      const pdfWidth = 1200
+      const pdfHeight = (canvasEl.height / canvasEl.width) * pdfWidth
+      const pdf = new jsPDF({
+        orientation: pdfHeight > pdfWidth ? 'portrait' : 'landscape',
+        unit: 'px',
+        format: [pdfWidth, pdfHeight]
+      })
 
-    // 动态加载html2canvas
-    const html2canvasScript = document.createElement('script')
-    html2canvasScript.src = 'https://cdn.bootcdn.net/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'
-    html2canvasScript.onload = async () => {
-      try {
-        const html2canvas = (window as any).html2canvas
-        const canvasEl = await html2canvas(container, opt)
-
-        // 创建PDF
-        const imgData = canvasEl.toDataURL('image/png')
-        const pdfWidth = 1200
-        const pdfHeight = (canvasEl.height / canvasEl.width) * pdfWidth
-
-        // 使用jsPDF
-        const jspdfScript = document.createElement('script')
-        jspdfScript.src = 'https://cdn.bootcdn.net/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
-        jspdfScript.onload = async () => {
-          try {
-            const { jsPDF } = (window as any).jspdf
-            const pdf = new jsPDF({
-              orientation: pdfHeight > pdfWidth ? 'portrait' : 'landscape',
-              unit: 'px',
-              format: [pdfWidth, pdfHeight]
-            })
-
-            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight)
-            pdf.save(`数据看板_${new Date().toISOString().split('T')[0]}.pdf`)
-
-            ElMessage.success('PDF导出成功')
-          } catch (err) {
-            console.error('PDF生成失败:', err)
-            ElMessage.error('PDF生成失败')
-          } finally {
-            document.body.removeChild(container)
-          }
-        }
-        document.head.appendChild(jspdfScript)
-      } catch (err) {
-        console.error('Canvas生成失败:', err)
-        ElMessage.error('PDF生成失败')
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight)
+      pdf.save(`数据看板_${new Date().toISOString().split('T')[0]}.pdf`)
+      ElMessage.success('PDF导出成功')
+    } catch (err) {
+      console.error('PDF生成失败:', err)
+      ElMessage.error('PDF生成失败')
+    } finally {
+      if (container.parentNode) {
         document.body.removeChild(container)
       }
     }
-    html2canvasScript.onerror = () => {
-      ElMessage.error('加载PDF生成库失败，请检查网络连接')
-      document.body.removeChild(container)
-    }
-    document.head.appendChild(html2canvasScript)
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('导出失败')
@@ -840,11 +862,17 @@ onUnmounted(() => {
 
   &__actions {
     display: flex;
+    align-items: center;
+    flex-wrap: wrap;
     gap: 12px;
 
     .btn-icon {
       margin-right: 4px;
     }
+  }
+
+  &__range {
+    width: 260px;
   }
 
   &__stats {
@@ -993,10 +1021,39 @@ onUnmounted(() => {
 
   &__body {
     height: 280px;
+
+    &.is-empty {
+      opacity: 0;
+      pointer-events: none;
+    }
+  }
+
+  &__body-wrap {
+    position: relative;
+    min-height: 280px;
+  }
+
+  &__empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #909399;
+    font-size: 14px;
+    background: #fafafa;
+    border: 1px dashed #dcdfe6;
+    border-radius: 8px;
   }
 }
 
 .top-cases-table {
+  &__empty {
+    padding: 32px 0;
+    color: #909399;
+    font-size: 14px;
+  }
+
   .rank-badge {
     display: inline-flex;
     align-items: center;
@@ -1062,6 +1119,14 @@ onUnmounted(() => {
 
     &__stats {
       grid-template-columns: repeat(2, 1fr);
+    }
+
+    &__actions {
+      width: 100%;
+    }
+
+    &__range {
+      width: 100%;
     }
   }
 

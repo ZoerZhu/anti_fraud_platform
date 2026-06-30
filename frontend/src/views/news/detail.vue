@@ -36,7 +36,7 @@
             <img :src="news.coverImage" :alt="news.title" />
           </div>
 
-          <article class="news-detail__body" v-html="news.content"></article>
+          <article class="news-detail__body">{{ news.content }}</article>
 
           <footer class="news-detail__footer">
             <button
@@ -118,7 +118,7 @@ const loadNews = async () => {
   try {
     const id = Number(route.params.id)
     const res = await getNewsDetail(id)
-    news.value = res.data
+    news.value = res
     
     // start browse timer - will send browse record with stayDuration on unmount
     startTime = Date.now()
@@ -277,29 +277,8 @@ onUnmounted(() => {
     font-size: 16px;
     line-height: 1.8;
     color: var(--text-secondary);
-
-    :deep(p) {
-      margin-bottom: 16px;
-    }
-
-    :deep(ol), :deep(ul) {
-      margin: 16px 0;
-      padding-left: 24px;
-    }
-
-    :deep(li) {
-      margin-bottom: 8px;
-    }
-
-    :deep(strong) {
-      color: var(--danger);
-    }
-
-    :deep(img) {
-      max-width: 100%;
-      height: auto;
-      border-radius: var(--radius-sm);
-    }
+    white-space: pre-wrap;
+    word-break: break-word;
   }
 
   &__footer {

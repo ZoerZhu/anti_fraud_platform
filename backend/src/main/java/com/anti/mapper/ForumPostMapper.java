@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 /**
  * 论坛帖子Mapper接口
@@ -32,23 +33,25 @@ public interface ForumPostMapper extends BaseMapper<ForumPost> {
     /**
      * 关键词搜索帖子
      */
-    IPage<ForumPost> searchByKeyword(Page<ForumPost> page, @Param("keyword") String keyword);
+    IPage<ForumPost> searchByKeyword(Page<ForumPost> page,
+                                     @Param("keyword") String keyword,
+                                     @Param("postType") String postType);
 
     /**
      * 增加浏览量
      */
-    @Select("UPDATE forum_post SET view_count = view_count + 1 WHERE id = #{postId}")
-    void incrementViewCount(@Param("postId") Long postId);
+    @Update("UPDATE forum_post SET view_count = view_count + 1 WHERE id = #{postId}")
+    int incrementViewCount(@Param("postId") Long postId);
 
     /**
      * 增加评论数
      */
-    @Select("UPDATE forum_post SET comment_count = comment_count + 1 WHERE id = #{postId}")
-    void incrementCommentCount(@Param("postId") Long postId);
+    @Update("UPDATE forum_post SET comment_count = comment_count + 1 WHERE id = #{postId}")
+    int incrementCommentCount(@Param("postId") Long postId);
 
     /**
      * 减少评论数
      */
-    @Select("UPDATE forum_post SET comment_count = comment_count - 1 WHERE id = #{postId} AND comment_count > 0")
-    void decrementCommentCount(@Param("postId") Long postId);
+    @Update("UPDATE forum_post SET comment_count = comment_count - 1 WHERE id = #{postId} AND comment_count > 0")
+    int decrementCommentCount(@Param("postId") Long postId);
 }

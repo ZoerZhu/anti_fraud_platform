@@ -2,8 +2,23 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.anti.mapper.UserAchievementMapper">
 
-    <select id="selectByUserId" resultType="com.anti.entity.UserAchievement">
-        SELECT ua.id, ua.user_id, ua.achievement_id, ua.achieved_time,
+    <resultMap id="UserAchievementWithAchievementMap" type="com.anti.entity.UserAchievement">
+        <id property="id" column="ua_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="achievementId" column="achievement_id"/>
+        <result property="achievedTime" column="achieved_time"/>
+        <association property="achievement" javaType="com.anti.entity.Achievement">
+            <id property="id" column="achievement_id"/>
+            <result property="code" column="code"/>
+            <result property="name" column="name"/>
+            <result property="description" column="description"/>
+            <result property="icon" column="icon"/>
+            <result property="scoreReward" column="score_reward"/>
+        </association>
+    </resultMap>
+
+    <select id="selectByUserId" resultMap="UserAchievementWithAchievementMap">
+        SELECT ua.id AS ua_id, ua.user_id, ua.achievement_id, ua.achieved_time,
                a.code, a.name, a.description, a.icon, a.score_reward
         FROM user_achievement ua
         LEFT JOIN achievement a ON ua.achievement_id = a.id

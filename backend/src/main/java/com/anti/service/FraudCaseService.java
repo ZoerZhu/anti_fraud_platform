@@ -19,6 +19,11 @@ public interface FraudCaseService {
     IPage<CaseVO> getCasePage(int pageNum, int pageSize, Long tagId, String keyword);
 
     /**
+     * 管理端分页查询案例列表
+     */
+    IPage<CaseVO> getAdminCasePage(int pageNum, int pageSize, Long tagId, String keyword, Integer status);
+
+    /**
      * 获取案例详情
      */
     CaseVO getCaseDetail(Long caseId, Long userId);

@@ -1,6 +1,7 @@
 package com.anti.service.impl;
 
 import com.anti.common.CacheConstants;
+import com.anti.common.BusinessException;
 import com.anti.entity.*;
 import com.anti.entity.vo.RecommendationVO;
 import com.anti.entity.vo.UserInterestVO;
@@ -51,6 +52,8 @@ public class RecommendationServiceImpl implements RecommendationService {
 
     @Override
     public List<RecommendationVO> getRecommendations(Long userId, int limit, String itemType) {
+        int safeLimit = normalizeLimit(limit);
+        String type = itemType != null && !itemType.trim().isEmpty() ? normalizeItemType(itemType) : "";
         UserProfile profile = userProfileMapper.selectByUserId(userId);
         if (profile == null) {
             profile = initUserProfile(userId);
@@ -59,17 +62,19 @@ public class RecommendationServiceImpl implements RecommendationService {
         String lifecycleStage = profile.getLifecycleStage() != null ? profile.getLifecycleStage() : "newbie";
         log.info("用户{} 生命周期阶段: {}, itemType={}", userId, lifecycleStage, itemType);
 
-        String type = itemType != null ? itemType.trim().toLowerCase() : "";
+        List<RecommendationVO> recommendations;
         if (!type.isEmpty()) {
-            return getTypedRecommendations(userId, limit, type, lifecycleStage, profile);
+            recommendations = getTypedRecommendations(userId, safeLimit, type, lifecycleStage, profile);
+        } else {
+            recommendations = switch (lifecycleStage) {
+                case "newbie" -> computeNewbieRecommendations(userId, safeLimit, profile);
+                case "growing" -> computeGrowingRecommendations(userId, safeLimit);
+                case "mature" -> computeMatureRecommendations(userId, safeLimit);
+                default -> computeNewbieRecommendations(userId, safeLimit, profile);
+            };
         }
-
-        return switch (lifecycleStage) {
-            case "newbie" -> getNewbieRecommendations(userId, limit);
-            case "growing" -> getGrowingRecommendations(userId, limit);
-            case "mature" -> getMatureRecommendations(userId, limit);
-            default -> getNewbieRecommendations(userId, limit);
-        };
+        recordRecommendationExposures(userId, recommendations, lifecycleStage);
+        return recommendations;
     }
 
     /**
@@ -88,9 +93,9 @@ public class RecommendationServiceImpl implements RecommendationService {
     private List<RecommendationVO> getCaseRecommendationsTyped(Long userId, int limit, String lifecycle, UserProfile profile) {
         int fetchLimit = Math.max(limit * 3, 18);
         List<RecommendationVO> base = switch (lifecycle) {
-            case "growing" -> getGrowingRecommendations(userId, fetchLimit);
-            case "mature" -> getMatureRecommendations(userId, fetchLimit);
-            default -> getNewbieRecommendations(userId, fetchLimit);
+            case "growing" -> computeGrowingRecommendations(userId, fetchLimit);
+            case "mature" -> computeMatureRecommendations(userId, fetchLimit);
+            default -> computeNewbieRecommendations(userId, fetchLimit);
         };
         List<RecommendationVO> cases = base.stream()
                 .filter(v -> "case".equals(v.getItemType()))
@@ -258,9 +263,20 @@ public class RecommendationServiceImpl implements RecommendationService {
      */
     @Override
     public List<RecommendationVO> getNewbieRecommendations(Long userId, int limit) {
+        int safeLimit = normalizeLimit(limit);
+        List<RecommendationVO> recommendations = computeNewbieRecommendations(userId, safeLimit);
+        recordRecommendationExposures(userId, recommendations, "newbie");
+        return recommendations;
+    }
+
+    private List<RecommendationVO> computeNewbieRecommendations(Long userId, int limit) {
+        return computeNewbieRecommendations(userId, limit, null);
+    }
+
+    private List<RecommendationVO> computeNewbieRecommendations(Long userId, int limit, UserProfile currentProfile) {
         log.info("执行新手期推荐策略, userId={}", userId);
 
-        UserProfile profile = userProfileMapper.selectByUserId(userId);
+        UserProfile profile = currentProfile != null ? currentProfile : userProfileMapper.selectByUserId(userId);
         if (profile == null) {
             profile = initUserProfile(userId);
         }
@@ -270,17 +286,24 @@ public class RecommendationServiceImpl implements RecommendationService {
         List<RecommendationVO> results = new ArrayList<>();
 
         // 1. 优先推荐必读资讯(全校必修内容)
-        results.addAll(getMandatoryNews(limit / 3));
+        results.addAll(getMandatoryNews(Math.min(limit, Math.max(1, limit / 3))));
 
         // 2. 筛选适合用户年级和专业的内容(静态属性匹配)
-        List<FraudCase> matchingCases = filterCasesByTarget(profile, limit);
+        List<FraudCase> matchingCases = filterCasesByTarget(profile, Math.max(1, limit / 3));
         for (FraudCase c : matchingCases) {
             RecommendationVO vo = convertCaseToVO(c, "grade_major_match");
             vo.setScore(calculateNewbieScore(c, profile, true));
             results.add(vo);
         }
 
-        // 3. 如果匹配内容不足，补充通用型热门内容
+        // 3. 补充基础关卡，保证冷启动不只给阅读内容
+        List<Challenge> baseChallenges = getBasicChallenges(Math.max(1, limit / 3));
+        for (Challenge ch : baseChallenges) {
+            RecommendationVO vo = convertChallengeToVO(ch, "基础闯关");
+            results.add(vo);
+        }
+
+        // 4. 如果匹配内容不足，补充通用型热门内容
         if (results.size() < limit) {
             List<FraudCase> hotCases = getHotCases(limit - results.size());
             for (FraudCase c : hotCases) {
@@ -290,15 +313,16 @@ public class RecommendationServiceImpl implements RecommendationService {
             }
         }
 
-        // 4. 情景模拟优先(动态属性优先级)
-        List<Challenge> scenarios = getScenarioChallenges(limit / 2);
+        // 5. 情景模拟优先(动态属性优先级)
+        List<Challenge> scenarios = getScenarioChallenges(Math.max(1, limit / 2));
         for (Challenge ch : scenarios) {
             RecommendationVO vo = convertChallengeToVO(ch, "scenario_priority");
             results.add(vo);
         }
 
         // 5. 排序并去重
-        return deduplicateAndSort(results, userId, limit);
+        List<RecommendationVO> finalResults = deduplicateAndSort(results, userId, limit);
+        return finalResults.isEmpty() ? computeNewbieRecommendations(userId, limit) : finalResults;
     }
 
     /**
@@ -315,9 +339,19 @@ public class RecommendationServiceImpl implements RecommendationService {
      */
     @Override
     public List<RecommendationVO> getGrowingRecommendations(Long userId, int limit) {
+        int safeLimit = normalizeLimit(limit);
+        List<RecommendationVO> recommendations = computeGrowingRecommendations(userId, safeLimit);
+        recordRecommendationExposures(userId, recommendations, "growing");
+        return recommendations;
+    }
+
+    private List<RecommendationVO> computeGrowingRecommendations(Long userId, int limit) {
         log.info("执行成长期推荐策略, userId={}", userId);
 
         UserProfile profile = userProfileMapper.selectByUserId(userId);
+        if (profile == null) {
+            profile = initUserProfile(userId);
+        }
         List<UserBehaviorMatrix> userTags = behaviorMatrixMapper.findByUserId(userId);
 
         Map<Long, BigDecimal> userInterestVector = buildInterestVector(userTags);
@@ -367,10 +401,23 @@ public class RecommendationServiceImpl implements RecommendationService {
      */
     @Override
     public List<RecommendationVO> getMatureRecommendations(Long userId, int limit) {
+        int safeLimit = normalizeLimit(limit);
+        List<RecommendationVO> recommendations = computeMatureRecommendations(userId, safeLimit);
+        recordRecommendationExposures(userId, recommendations, "mature");
+        return recommendations;
+    }
+
+    private List<RecommendationVO> computeMatureRecommendations(Long userId, int limit) {
         log.info("执行成熟期推荐策略, userId={}", userId);
 
         UserProfile profile = userProfileMapper.selectByUserId(userId);
+        if (profile == null) {
+            profile = initUserProfile(userId);
+        }
         Map<Long, BigDecimal> userInterestVector = buildInterestVector(behaviorMatrixMapper.findByUserId(userId));
+        if (userInterestVector.isEmpty()) {
+            return computeNewbieRecommendations(userId, limit);
+        }
 
         List<RecommendationVO> results = new ArrayList<>();
 
@@ -398,7 +445,8 @@ public class RecommendationServiceImpl implements RecommendationService {
         results = reorderBySequence(results, userId);
 
         // 6. 去重
-        return deduplicateAndSort(results, userId, limit);
+        List<RecommendationVO> finalResults = deduplicateAndSort(results, userId, limit);
+        return finalResults.isEmpty() ? computeNewbieRecommendations(userId, limit) : finalResults;
     }
 
     @Override
@@ -462,17 +510,40 @@ public class RecommendationServiceImpl implements RecommendationService {
 
     @Override
     public void recordRecommendationClick(Long userId, Long itemId, String itemType) {
+        String normalizedType = normalizeItemType(itemType);
+        validateRecommendableItem(itemId, normalizedType);
         LambdaQueryWrapper<RecommendationLog> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(RecommendationLog::getUserId, userId)
                 .eq(RecommendationLog::getItemId, itemId)
-                .eq(RecommendationLog::getItemType, itemType)
+                .eq(RecommendationLog::getItemType, normalizedType)
                 .orderByDesc(RecommendationLog::getCreateTime)
                 .last("LIMIT 1");
         RecommendationLog log = recommendationLogMapper.selectOne(wrapper);
         if (log != null) {
             log.setClicked(1);
             recommendationLogMapper.updateById(log);
+        } else {
+            RecommendationLog fallback = new RecommendationLog();
+            fallback.setUserId(userId);
+            fallback.setItemId(itemId);
+            fallback.setItemType(normalizedType);
+            fallback.setRecommendReason("[\"direct_click\"]");
+            fallback.setScore(BigDecimal.ZERO);
+            fallback.setLifecycleStage("unknown");
+            fallback.setClicked(1);
+            fallback.setCreateTime(java.time.LocalDateTime.now());
+            recommendationLogMapper.insert(fallback);
         }
+
+        if ("case".equals(normalizedType)) {
+            List<Long> tagIds = fraudCaseMapper.findTagIdsByCaseId(itemId);
+            for (Long tagId : tagIds) {
+                if (tagId != null) {
+                    updateUserBehaviorMatrix(userId, tagId, BigDecimal.ONE);
+                }
+            }
+        }
+        redisCacheUtil.deleteUserRecommendations(userId);
     }
 
     @Override
@@ -645,14 +716,17 @@ public class RecommendationServiceImpl implements RecommendationService {
         );
     }
 
-    private List<RecommendationVO> getMandatoryNews(int limit) {
-        List<News> news = newsMapper.selectList(
-                new QueryWrapper<News>()
+    private List<Challenge> getBasicChallenges(int limit) {
+        return challengeMapper.selectList(
+                new QueryWrapper<Challenge>()
                         .eq("status", 1)
-                        .eq("is_mandatory", 1)
-                        .orderByDesc("publish_time")
-                        .last("LIMIT " + limit)
+                        .orderByAsc("level_order")
+                        .last("LIMIT " + Math.max(1, limit))
         );
+    }
+
+    private List<RecommendationVO> getMandatoryNews(int limit) {
+        List<News> news = newsMapper.selectRequiredNews(Math.max(1, limit));
         return news.stream()
                 .map(n -> {
                     RecommendationVO vo = convertNewsToVO(n, List.of("全校必读（置顶策略）"));
@@ -814,7 +888,8 @@ public class RecommendationServiceImpl implements RecommendationService {
                 }
             }
 
-            if (profile.getKnowledgeLevel() < 30) {
+            int knowledgeLevel = profile.getKnowledgeLevel() != null ? profile.getKnowledgeLevel() : 0;
+            if (knowledgeLevel < 30) {
                 if (vo.getReasons() != null && vo.getReasons().contains("simple")) {
                     contextScore = contextScore.multiply(BigDecimal.valueOf(1.1));
                 }
@@ -937,27 +1012,122 @@ public class RecommendationServiceImpl implements RecommendationService {
         Set<Long> excludedNews = new HashSet<>(recommendationLogMapper.findRecommendedNewsIds(userId));
         Set<Long> excludedCh = new HashSet<>(recommendationLogMapper.findRecommendedChallengeIds(userId));
 
-        return results.stream()
-                .filter(vo -> {
-                    if (vo.getItemId() == null) {
-                        return false;
-                    }
-                    String t = vo.getItemType();
-                    if ("news".equals(t)) {
-                        return !excludedNews.contains(vo.getItemId());
-                    }
-                    if ("challenge".equals(t)) {
-                        return !excludedCh.contains(vo.getItemId());
-                    }
-                    return !excludedCases.contains(vo.getItemId());
-                })
+        List<RecommendationVO> sorted = results.stream()
+                .filter(vo -> vo.getItemId() != null && vo.getItemType() != null)
                 .sorted((a, b) -> {
                     BigDecimal sa = a.getScore() != null ? a.getScore() : BigDecimal.ZERO;
                     BigDecimal sb = b.getScore() != null ? b.getScore() : BigDecimal.ZERO;
                     return sb.compareTo(sa);
                 })
-                .limit(limit)
+                .collect(Collectors.collectingAndThen(
+                        Collectors.toMap(
+                                vo -> vo.getItemType() + ":" + vo.getItemId(),
+                                vo -> vo,
+                                (first, second) -> first,
+                                LinkedHashMap::new
+                        ),
+                        map -> new ArrayList<>(map.values())
+                ));
+
+        List<RecommendationVO> fresh = sorted.stream()
+                .filter(vo -> !hasBeenRecommended(vo, excludedCases, excludedNews, excludedCh))
                 .collect(Collectors.toList());
+
+        if (fresh.size() >= limit) {
+            return fresh.stream().limit(limit).collect(Collectors.toList());
+        }
+
+        Set<String> selectedKeys = fresh.stream()
+                .map(vo -> vo.getItemType() + ":" + vo.getItemId())
+                .collect(Collectors.toSet());
+        List<RecommendationVO> merged = new ArrayList<>(fresh);
+        for (RecommendationVO vo : sorted) {
+            if (merged.size() >= limit) {
+                break;
+            }
+            String key = vo.getItemType() + ":" + vo.getItemId();
+            if (selectedKeys.add(key)) {
+                merged.add(vo);
+            }
+        }
+        return merged;
+    }
+
+    private boolean hasBeenRecommended(RecommendationVO vo, Set<Long> excludedCases,
+                                       Set<Long> excludedNews, Set<Long> excludedChallenges) {
+        String type = vo.getItemType();
+        if ("news".equals(type)) {
+            return excludedNews.contains(vo.getItemId());
+        }
+        if ("challenge".equals(type)) {
+            return excludedChallenges.contains(vo.getItemId());
+        }
+        return excludedCases.contains(vo.getItemId());
+    }
+
+    private void recordRecommendationExposures(Long userId, List<RecommendationVO> recommendations, String lifecycleStage) {
+        if (recommendations == null || recommendations.isEmpty()) {
+            return;
+        }
+        for (RecommendationVO vo : recommendations) {
+            if (vo.getItemId() == null || vo.getItemType() == null) {
+                continue;
+            }
+            RecommendationLog log = new RecommendationLog();
+            log.setUserId(userId);
+            log.setItemId(vo.getItemId());
+            log.setItemType(vo.getItemType());
+            log.setRecommendReason(toReasonJson(vo.getReasons()));
+            log.setScore(vo.getScore());
+            log.setLifecycleStage(lifecycleStage);
+            log.setClicked(0);
+            log.setCreateTime(java.time.LocalDateTime.now());
+            recommendationLogMapper.insert(log);
+        }
+    }
+
+    private String toReasonJson(List<String> reasons) {
+        try {
+            return objectMapper.writeValueAsString(reasons != null ? reasons : Collections.emptyList());
+        } catch (Exception e) {
+            return "[]";
+        }
+    }
+
+    private int normalizeLimit(int limit) {
+        return Math.max(1, Math.min(limit, 50));
+    }
+
+    private String normalizeItemType(String itemType) {
+        String type = itemType == null ? "" : itemType.trim().toLowerCase();
+        if (!Set.of("case", "news", "challenge").contains(type)) {
+            throw new BusinessException(400, "推荐类型只能是case、news或challenge");
+        }
+        return type;
+    }
+
+    private void validateRecommendableItem(Long itemId, String itemType) {
+        if (itemId == null || itemId <= 0) {
+            throw new BusinessException(400, "推荐项ID不合法");
+        }
+        if ("case".equals(itemType)) {
+            FraudCase item = fraudCaseMapper.selectById(itemId);
+            if (item == null || !Integer.valueOf(1).equals(item.getStatus())) {
+                throw new BusinessException(404, "推荐案例不存在或已下线");
+            }
+            return;
+        }
+        if ("news".equals(itemType)) {
+            News item = newsMapper.selectById(itemId);
+            if (item == null || !Integer.valueOf(1).equals(item.getStatus())) {
+                throw new BusinessException(404, "推荐资讯不存在或已下线");
+            }
+            return;
+        }
+        Challenge item = challengeMapper.selectById(itemId);
+        if (item == null || !Integer.valueOf(1).equals(item.getStatus())) {
+            throw new BusinessException(404, "推荐关卡不存在或已下线");
+        }
     }
 
     private RecommendationVO convertCaseToVO(FraudCase c, String reason) {

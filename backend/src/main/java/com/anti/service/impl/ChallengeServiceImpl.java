@@ -41,6 +41,8 @@ import java.util.stream.Collectors;
 @Service
 public class ChallengeServiceImpl implements ChallengeService {
 
+    private static final int MAX_PAGE_SIZE = 50;
+
     @Autowired
     private ChallengeMapper challengeMapper;
 
@@ -64,30 +66,34 @@ public class ChallengeServiceImpl implements ChallengeService {
 
     @Override
     public List<ChallengeVO> getChallengeList(Long userId) {
-        List<Challenge> challenges = challengeMapper.selectEnabledChallenges();
-        List<Long> passedIds = userId != null ? recordMapper.selectPassedChallengeIds(userId) : Collections.emptyList();
+        List<Challenge> challenges = safeList(challengeMapper.selectEnabledChallenges());
+        List<Long> passedIds = userId != null ? safeList(recordMapper.selectPassedChallengeIds(userId)) : Collections.emptyList();
 
         Map<Long, Integer> highestScores = new HashMap<>();
         if (userId != null) {
             for (Long passedId : passedIds) {
-                highestScores.put(passedId, recordMapper.selectHighestScore(userId, passedId));
+                if (passedId != null) {
+                    highestScores.put(passedId, recordMapper.selectHighestScore(userId, passedId));
+                }
             }
         }
 
         List<ChallengeVO> result = new ArrayList<>();
         Set<Long> passedSet = new HashSet<>(passedIds);
-        Integer prevPassedLevel = null;
+        int firstLevel = challenges.stream()
+                .mapToInt(c -> c.getLevelOrder() != null ? c.getLevelOrder() : Integer.MAX_VALUE)
+                .min()
+                .orElse(1);
+        int maxPassedLevel = getMaxPassedLevel(passedIds);
 
         for (Challenge c : challenges) {
             ChallengeVO vo = convertToVO(c);
             vo.setPassed(passedSet.contains(c.getId()));
             vo.setHighestScore(highestScores.get(c.getId()));
 
-            if (vo.getPassed()) {
-                prevPassedLevel = c.getLevelOrder();
-            }
-
-            boolean shouldUnlock = prevPassedLevel == null || c.getLevelOrder() <= prevPassedLevel + 1;
+            int levelOrder = c.getLevelOrder() != null ? c.getLevelOrder() : firstLevel;
+            boolean shouldUnlock = vo.getPassed()
+                    || levelOrder <= (maxPassedLevel > 0 ? maxPassedLevel + 1 : firstLevel);
             vo.setLocked(!shouldUnlock && !vo.getPassed());
 
             if (vo.getLocked()) {
@@ -106,6 +112,9 @@ public class ChallengeServiceImpl implements ChallengeService {
         if (challenge == null) {
             throw new BusinessException("关卡不存在");
         }
+        if (!Objects.equals(challenge.getStatus(), 1)) {
+            throw new BusinessException("关卡不存在或已禁用");
+        }
 
         ChallengeVO vo = convertToVO(challenge);
 
@@ -116,9 +125,13 @@ public class ChallengeServiceImpl implements ChallengeService {
                 vo.setHighestScore(record.getScore());
             }
 
-            List<Long> passedIds = recordMapper.selectPassedChallengeIds(userId);
-            boolean shouldUnlock = passedIds.isEmpty() || challenge.getLevelOrder() <= getMaxPassedLevel(passedIds) + 1;
-            vo.setLocked(!shouldUnlock && !vo.getPassed());
+            List<Long> passedIds = safeList(recordMapper.selectPassedChallengeIds(userId));
+            int levelOrder = challenge.getLevelOrder() != null ? challenge.getLevelOrder() : getFirstEnabledLevel();
+            int maxPassedLevel = getMaxPassedLevel(passedIds);
+            boolean alreadyPassed = Boolean.TRUE.equals(vo.getPassed());
+            boolean shouldUnlock = alreadyPassed
+                    || levelOrder <= (maxPassedLevel > 0 ? maxPassedLevel + 1 : getFirstEnabledLevel());
+            vo.setLocked(!shouldUnlock && !alreadyPassed);
         }
 
         return vo;
@@ -126,7 +139,7 @@ public class ChallengeServiceImpl implements ChallengeService {
 
     @Override
     public IPage<ChallengeRecordVO> getChallengeRecords(Long userId, int pageNum, int pageSize) {
-        Page<UserChallengeRecord> page = new Page<>(pageNum, pageSize);
+        Page<UserChallengeRecord> page = new Page<>(Math.max(1, pageNum), Math.max(1, Math.min(pageSize, MAX_PAGE_SIZE)));
         LambdaQueryWrapper<UserChallengeRecord> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(UserChallengeRecord::getUserId, userId);
         wrapper.orderByDesc(UserChallengeRecord::getEndTime);
@@ -159,6 +172,9 @@ public class ChallengeServiceImpl implements ChallengeService {
         if (challenge == null) {
             throw new BusinessException("关卡不存在");
         }
+        if (!Objects.equals(challenge.getStatus(), 1)) {
+            throw new BusinessException("关卡不存在或已禁用");
+        }
 
         if (!"quiz".equals(challenge.getType())) {
             throw new BusinessException("该关卡不是答题类型");
@@ -173,9 +189,11 @@ public class ChallengeServiceImpl implements ChallengeService {
         if (content == null || content.getQuestions() == null) {
             throw new BusinessException("关卡题目数据异常");
         }
+        validateQuizContent(content);
 
         List<Challenge.ChallengeContent.Question> questions = content.getQuestions();
         Map<String, List<Integer>> userAnswers = request.getAnswers();
+        validateSubmittedAnswers(questions, userAnswers);
 
         int totalScore = 0;
         int maxScore = 0;
@@ -215,7 +233,12 @@ public class ChallengeServiceImpl implements ChallengeService {
         detail.setMaxScore(maxScore);
         detail.setCorrectCount(correctCount);
 
+        LocalDateTime submittedStartTime = resolveSubmitStartTime(request.getStartTime());
         UserChallengeRecord record = recordMapper.selectLatestByUserAndChallenge(userId, request.getChallengeId());
+        if (record != null && request.getStartTime() != null && submittedStartTime.equals(record.getStartTime())) {
+            throw new BusinessException("请勿重复提交同一次答题");
+        }
+        boolean alreadyPassed = safeList(recordMapper.selectPassedChallengeIds(userId)).contains(request.getChallengeId());
         int attempts = 1;
         if (record != null) {
             attempts = record.getAttempts() + 1;
@@ -228,15 +251,15 @@ public class ChallengeServiceImpl implements ChallengeService {
         newRecord.setScore(totalScore);
         newRecord.setPassed(passed ? 1 : 0);
         newRecord.setAnswerDetail(detail);
-        newRecord.setStartTime(request.getStartTime() != null ?
-                LocalDateTime.ofEpochSecond(request.getStartTime() / 1000, 0, java.time.ZoneOffset.ofHours(8)) :
-                LocalDateTime.now().minusMinutes(10));
+        newRecord.setStartTime(submittedStartTime);
         newRecord.setEndTime(LocalDateTime.now());
         try {
             recordMapper.insert(newRecord);
         } catch (Exception e) {
             // 数据库/JSON 序列化失败时，转为业务异常避免 500
-            throw new BusinessException("保存闯关记录失败：" + e.getMessage());
+            log.warn("保存闯关记录失败 userId={} challengeId={} err={}",
+                    userId, request.getChallengeId(), e.getClass().getSimpleName());
+            throw new BusinessException("保存闯关记录失败，请稍后重试");
         }
 
         try {
@@ -251,25 +274,27 @@ public class ChallengeServiceImpl implements ChallengeService {
         result.setMaxScore(maxScore);
         result.setCorrectCount(correctCount);
         result.setTotalCount(questions.size());
+        result.setAnswerDetail(detail);
 
-        int highestScore = recordMapper.selectHighestScore(userId, request.getChallengeId()) != null ?
-                recordMapper.selectHighestScore(userId, request.getChallengeId()) : 0;
+        Integer highestScoreValue = recordMapper.selectHighestScore(userId, request.getChallengeId());
+        int highestScore = highestScoreValue != null ? highestScoreValue : 0;
         result.setNewRecord(totalScore > highestScore);
         result.setHighestScore(Math.max(totalScore, highestScore));
 
         if (passed) {
             int earnedScore = challenge.getScoreReward() != null ? challenge.getScoreReward() : 0;
-            result.setEarnedScore(earnedScore);
+            result.setEarnedScore(alreadyPassed ? 0 : earnedScore);
 
-            if (earnedScore > 0) {
+            if (!alreadyPassed && earnedScore > 0) {
                 try {
                     scoreService.addScore(userId, earnedScore, "闯关奖励");
                     leaderboardService.updateScore(userId, earnedScore, "daily");
                     leaderboardService.updateScore(userId, earnedScore, "weekly");
                     leaderboardService.updateScore(userId, earnedScore, "all");
                 } catch (Exception e) {
-                    // 避免把下游异常直接暴露为 500
-                    throw new BusinessException("积分或排行榜更新失败：" + e.getMessage());
+                    log.warn("闯关奖励发放失败 userId={} challengeId={} err={}",
+                            userId, challenge.getId(), e.getClass().getSimpleName());
+                    throw new BusinessException("积分或排行榜更新失败，请稍后重试");
                 }
             }
 
@@ -293,9 +318,11 @@ public class ChallengeServiceImpl implements ChallengeService {
                 int knowledgeGain = Math.round((totalScore * difficulty) / 20f);
                 if (knowledgeGain > 0) {
                     var profile = profileService.getProfileByUserId(userId);
-                    int newLevel = Math.min(100, (profile.getKnowledgeLevel() != null ? profile.getKnowledgeLevel() : 0) + knowledgeGain);
-                    profileService.updateKnowledgeLevel(userId, newLevel);
-                    log.info("闯关通关更新知识水平 userId={} gain={} newLevel={}", userId, knowledgeGain, newLevel);
+                    if (profile != null) {
+                        int newLevel = Math.min(100, (profile.getKnowledgeLevel() != null ? profile.getKnowledgeLevel() : 0) + knowledgeGain);
+                        profileService.updateKnowledgeLevel(userId, newLevel);
+                        log.info("闯关通关更新知识水平 userId={} gain={} newLevel={}", userId, knowledgeGain, newLevel);
+                    }
                 }
             } catch (Exception e) {
                 log.warn("闯关通关后更新知识水平失败 userId={} msg={}", userId, e.getMessage());
@@ -311,6 +338,9 @@ public class ChallengeServiceImpl implements ChallengeService {
 
     @Override
     public ChallengeVO createChallenge(CreateChallengeRequest request) {
+        validateChallengeType(request.getType());
+        validateChallengeDefinition(request.getType(), request.getContent(), request.getScripts());
+
         Challenge challenge = new Challenge();
         challenge.setTitle(request.getTitle());
         challenge.setDescription(request.getDescription());
@@ -345,6 +375,9 @@ public class ChallengeServiceImpl implements ChallengeService {
         if (request.getScripts() != null) challenge.setScripts(request.getScripts());
         if (request.getStatus() != null) challenge.setStatus(request.getStatus());
 
+        validateChallengeType(challenge.getType());
+        validateChallengeDefinition(challenge.getType(), challenge.getContent(), challenge.getScripts());
+
         challengeMapper.updateById(challenge);
         return convertToVO(challenge);
     }
@@ -355,14 +388,21 @@ public class ChallengeServiceImpl implements ChallengeService {
     }
 
     @Override
-    public IPage<ChallengeVO> getAdminChallengeList(int pageNum, int pageSize, String keyword, String type) {
-        Page<Challenge> page = new Page<>(pageNum, pageSize);
-        LambdaQueryWrapper<Challenge> wrapper = new LambdaQueryWrapper<>();
-        if (keyword != null && !keyword.isEmpty()) {
-            wrapper.like(Challenge::getTitle, keyword);
+    public IPage<ChallengeVO> getAdminChallengeList(int pageNum, int pageSize, String keyword, String type, Integer status) {
+        if (status != null && status != 0 && status != 1) {
+            throw new BusinessException("状态只能为0或1");
         }
-        if (type != null && !type.isEmpty()) {
+        Page<Challenge> page = new Page<>(Math.max(1, pageNum), Math.max(1, Math.min(pageSize, MAX_PAGE_SIZE)));
+        LambdaQueryWrapper<Challenge> wrapper = new LambdaQueryWrapper<>();
+        if (keyword != null && !keyword.isBlank()) {
+            wrapper.like(Challenge::getTitle, keyword.trim());
+        }
+        if (type != null && !type.isBlank()) {
+            validateChallengeType(type);
             wrapper.eq(Challenge::getType, type);
+        }
+        if (status != null) {
+            wrapper.eq(Challenge::getStatus, status);
         }
         wrapper.orderByAsc(Challenge::getLevelOrder);
         IPage<Challenge> challengePage = challengeMapper.selectPage(page, wrapper);
@@ -371,7 +411,7 @@ public class ChallengeServiceImpl implements ChallengeService {
 
     @Override
     public ChallengeProgressVO getChallengeProgress(Long userId) {
-        List<Challenge> challenges = challengeMapper.selectEnabledChallenges();
+        List<Challenge> challenges = safeList(challengeMapper.selectEnabledChallenges());
         int passedCount = recordMapper.countPassedChallenges(userId);
 
         ChallengeProgressVO progress = new ChallengeProgressVO();
@@ -407,7 +447,7 @@ public class ChallengeServiceImpl implements ChallengeService {
     }
 
     private Map<Long, String> getChallengeNames() {
-        List<Challenge> challenges = challengeMapper.selectEnabledChallenges();
+        List<Challenge> challenges = safeList(challengeMapper.selectEnabledChallenges());
         Map<Long, String> names = new HashMap<>();
         for (Challenge c : challenges) {
             names.put(c.getId(), c.getTitle());
@@ -416,12 +456,213 @@ public class ChallengeServiceImpl implements ChallengeService {
     }
 
     private int getMaxPassedLevel(List<Long> passedIds) {
-        if (passedIds.isEmpty()) return 0;
-        List<Challenge> challenges = challengeMapper.selectBatchIds(passedIds);
+        if (passedIds == null || passedIds.isEmpty()) return 0;
+        List<Challenge> challenges = safeList(challengeMapper.selectBatchIds(passedIds));
         return challenges.stream()
                 .mapToInt(c -> c.getLevelOrder() != null ? c.getLevelOrder() : 0)
                 .max()
                 .orElse(0);
+    }
+
+    private int getFirstEnabledLevel() {
+        return safeList(challengeMapper.selectEnabledChallenges()).stream()
+                .mapToInt(c -> c.getLevelOrder() != null ? c.getLevelOrder() : Integer.MAX_VALUE)
+                .min()
+                .orElse(1);
+    }
+
+    private <T> List<T> safeList(List<T> values) {
+        return values == null ? Collections.emptyList() : values;
+    }
+
+    private LocalDateTime resolveSubmitStartTime(Long startTime) {
+        if (startTime == null) {
+            return LocalDateTime.now().minusMinutes(10);
+        }
+        try {
+            return LocalDateTime.ofEpochSecond(startTime / 1000, 0, java.time.ZoneOffset.ofHours(8));
+        } catch (Exception e) {
+            throw new BusinessException("开始时间格式不正确");
+        }
+    }
+
+    private void validateChallengeType(String type) {
+        if (!"quiz".equals(type) && !"scenario".equals(type)) {
+            throw new BusinessException("关卡类型只能是quiz或scenario");
+        }
+    }
+
+    private void validateChallengeDefinition(String type,
+                                             Challenge.ChallengeContent content,
+                                             Challenge.ScenarioScript scripts) {
+        if ("quiz".equals(type)) {
+            validateQuizContent(content);
+            return;
+        }
+        validateScenarioScript(scripts);
+    }
+
+    private void validateQuizContent(Challenge.ChallengeContent content) {
+        if (content == null || content.getQuestions() == null || content.getQuestions().isEmpty()) {
+            throw new BusinessException("答题关卡至少需要1道题目");
+        }
+
+        Set<String> questionIds = new HashSet<>();
+        for (Challenge.ChallengeContent.Question question : content.getQuestions()) {
+            if (question == null || question.getId() == null || question.getId().isBlank()) {
+                throw new BusinessException("题目ID不能为空");
+            }
+            if (!questionIds.add(question.getId())) {
+                throw new BusinessException("题目ID不能重复：" + question.getId());
+            }
+            if (question.getText() == null || question.getText().isBlank()) {
+                throw new BusinessException("题目内容不能为空");
+            }
+            if (!Set.of("single", "multiple", "truefalse").contains(question.getQuestionType())) {
+                throw new BusinessException("题目类型只能是single、multiple或truefalse");
+            }
+            if (question.getScore() == null || question.getScore() <= 0 || question.getScore() > 100) {
+                throw new BusinessException("题目分值必须在1到100之间");
+            }
+            List<Challenge.ChallengeContent.Question.Option> options = question.getOptions();
+            if (options == null || options.size() < 2) {
+                throw new BusinessException("题目至少需要2个选项：" + question.getId());
+            }
+            for (Challenge.ChallengeContent.Question.Option option : options) {
+                if (option == null || option.getText() == null || option.getText().isBlank()) {
+                    throw new BusinessException("题目选项内容不能为空：" + question.getId());
+                }
+            }
+            List<Integer> correctIndexes = question.getCorrectIndexes();
+            if (correctIndexes == null || correctIndexes.isEmpty()) {
+                throw new BusinessException("题目正确答案不能为空：" + question.getId());
+            }
+            if (new HashSet<>(correctIndexes).size() != correctIndexes.size()) {
+                throw new BusinessException("题目正确答案索引不能重复：" + question.getId());
+            }
+            if (!"multiple".equals(question.getQuestionType()) && correctIndexes.size() != 1) {
+                throw new BusinessException("单选或判断题只能有1个正确答案：" + question.getId());
+            }
+            for (Integer index : correctIndexes) {
+                if (index == null || index < 0 || index >= options.size()) {
+                    throw new BusinessException("题目正确答案索引越界：" + question.getId());
+                }
+            }
+        }
+    }
+
+    private void validateSubmittedAnswers(List<Challenge.ChallengeContent.Question> questions,
+                                          Map<String, List<Integer>> userAnswers) {
+        Map<String, Challenge.ChallengeContent.Question> questionMap = questions.stream()
+                .collect(Collectors.toMap(Challenge.ChallengeContent.Question::getId, q -> q));
+
+        for (String answerId : userAnswers.keySet()) {
+            if (!questionMap.containsKey(answerId)) {
+                throw new BusinessException("答案包含不存在的题目：" + answerId);
+            }
+        }
+
+        for (Challenge.ChallengeContent.Question question : questions) {
+            List<Integer> selected = userAnswers.getOrDefault(question.getId(), Collections.emptyList());
+            if (new HashSet<>(selected).size() != selected.size()) {
+                throw new BusinessException("答案选项不能重复：" + question.getId());
+            }
+            int optionSize = question.getOptions() != null ? question.getOptions().size() : 0;
+            for (Integer index : selected) {
+                if (index == null || index < 0 || index >= optionSize) {
+                    throw new BusinessException("答案选项索引越界：" + question.getId());
+                }
+            }
+            if (!"multiple".equals(question.getQuestionType()) && selected.size() > 1) {
+                throw new BusinessException("单选或判断题只能选择1个答案：" + question.getId());
+            }
+        }
+    }
+
+    private void validateScenarioScript(Challenge.ScenarioScript script) {
+        if (script == null || script.getNodes() == null || script.getNodes().isEmpty()) {
+            throw new BusinessException("情景模拟至少需要1个节点");
+        }
+        if (script.getStartNodeId() == null || script.getStartNodeId().isBlank()) {
+            throw new BusinessException("情景模拟必须设置起始节点");
+        }
+        if (script.getEndNodeIds() == null || script.getEndNodeIds().isEmpty()) {
+            throw new BusinessException("情景模拟至少需要1个结局节点");
+        }
+
+        Map<String, Challenge.ScenarioScript.ScenarioNode> nodeMap = new HashMap<>();
+        for (Challenge.ScenarioScript.ScenarioNode node : script.getNodes()) {
+            if (node == null || node.getId() == null || node.getId().isBlank()) {
+                throw new BusinessException("节点ID不能为空");
+            }
+            if (nodeMap.put(node.getId(), node) != null) {
+                throw new BusinessException("节点ID不能重复：" + node.getId());
+            }
+            if (node.getTitle() == null || node.getTitle().isBlank()) {
+                throw new BusinessException("节点标题不能为空：" + node.getId());
+            }
+            if (!Set.of("start", "dialog", "decision", "result", "end").contains(node.getType())) {
+                throw new BusinessException("节点类型非法：" + node.getId());
+            }
+        }
+
+        if (!nodeMap.containsKey(script.getStartNodeId())) {
+            throw new BusinessException("起始节点不存在");
+        }
+
+        for (String endNodeId : script.getEndNodeIds()) {
+            Challenge.ScenarioScript.ScenarioNode endNode = nodeMap.get(endNodeId);
+            if (endNode == null) {
+                throw new BusinessException("结局节点不存在：" + endNodeId);
+            }
+            if (!"end".equals(endNode.getType())) {
+                throw new BusinessException("结局节点类型必须为end：" + endNodeId);
+            }
+        }
+
+        List<Challenge.ScenarioScript.ScenarioEdge> edges = script.getEdges() != null ? script.getEdges() : Collections.emptyList();
+        Map<String, List<String>> adjacency = new HashMap<>();
+        for (Challenge.ScenarioScript.ScenarioEdge edge : edges) {
+            if (edge == null || edge.getFrom() == null || edge.getFrom().isBlank()
+                    || edge.getTo() == null || edge.getTo().isBlank()) {
+                throw new BusinessException("连接的起点和终点不能为空");
+            }
+            if (!nodeMap.containsKey(edge.getFrom())) {
+                throw new BusinessException("连接起点不存在：" + edge.getFrom());
+            }
+            if (!nodeMap.containsKey(edge.getTo())) {
+                throw new BusinessException("连接终点不存在：" + edge.getTo());
+            }
+            if (edge.getLabel() == null || edge.getLabel().isBlank()) {
+                throw new BusinessException("连接选项文案不能为空：" + edge.getFrom() + "->" + edge.getTo());
+            }
+            adjacency.computeIfAbsent(edge.getFrom(), key -> new ArrayList<>()).add(edge.getTo());
+        }
+
+        for (Challenge.ScenarioScript.ScenarioNode node : script.getNodes()) {
+            if (!script.getEndNodeIds().contains(node.getId()) && !adjacency.containsKey(node.getId())) {
+                throw new BusinessException("非结局节点必须至少有一条出边：" + node.getId());
+            }
+        }
+
+        Set<String> reachable = new HashSet<>();
+        Deque<String> queue = new ArrayDeque<>();
+        queue.add(script.getStartNodeId());
+        reachable.add(script.getStartNodeId());
+        while (!queue.isEmpty()) {
+            String current = queue.removeFirst();
+            for (String next : adjacency.getOrDefault(current, Collections.emptyList())) {
+                if (reachable.add(next)) {
+                    queue.addLast(next);
+                }
+            }
+        }
+
+        for (String nodeId : nodeMap.keySet()) {
+            if (!reachable.contains(nodeId)) {
+                throw new BusinessException("存在从起始节点不可达的节点：" + nodeId);
+            }
+        }
     }
 
     @Override
@@ -530,9 +771,16 @@ public class ChallengeServiceImpl implements ChallengeService {
         if (challengeIds == null || challengeIds.isEmpty()) {
             throw new BusinessException("请选择要操作的关卡");
         }
+        if (status == null || (status != 0 && status != 1)) {
+            throw new BusinessException("状态只能为0或1");
+        }
         for (Long id : challengeIds) {
             Challenge challenge = challengeMapper.selectById(id);
             if (challenge != null) {
+                if (status == 1) {
+                    validateChallengeType(challenge.getType());
+                    validateChallengeDefinition(challenge.getType(), challenge.getContent(), challenge.getScripts());
+                }
                 challenge.setStatus(status);
                 challengeMapper.updateById(challenge);
             }

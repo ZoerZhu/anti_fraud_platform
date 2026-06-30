@@ -1,10 +1,10 @@
-import request from '@/utils/request'
-import type { AxiosPromise } from 'axios'
+import { del, get, post } from '@/utils/request'
 
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   time?: string
+  fallback?: boolean
   /** 助手回复满意度：1 满意 / -1 不满意 */
   feedback?: 1 | -1
 }
@@ -14,6 +14,7 @@ export interface ChatVO {
   question: string
   answer: string
   tokensUsed: number
+  fallback?: boolean
   createTime: string
 }
 
@@ -47,71 +48,48 @@ export interface FeedbackRequest {
 /**
  * 发送问题并获取AI回答
  */
-export function askQuestion(data: ChatRequest): AxiosPromise<ChatVO> {
-  return request({
-    url: '/chat/ask',
-    method: 'post',
-    data
-  })
+export function askQuestion(data: ChatRequest): Promise<ChatVO> {
+  return post<ChatVO>('/chat/ask', data)
 }
 
 /**
  * 获取会话历史
  */
-export function getConversationHistory(sessionId: string): AxiosPromise<ChatVO[]> {
-  return request({
-    url: `/chat/history/${sessionId}`,
-    method: 'get'
-  })
+export function getConversationHistory(sessionId: string): Promise<ChatVO[]> {
+  return get<ChatVO[]>(`/chat/history/${sessionId}`)
 }
 
 /**
  * 获取会话列表
  */
-export function getSessionList(): AxiosPromise<SessionVO[]> {
-  return request({
-    url: '/chat/sessions',
-    method: 'get'
-  })
+export function getSessionList(): Promise<SessionVO[]> {
+  return get<SessionVO[]>('/chat/sessions')
 }
 
 /**
  * 提交反馈
  */
-export function submitFeedback(data: FeedbackRequest): AxiosPromise<void> {
-  return request({
-    url: '/chat/feedback',
-    method: 'post',
-    data
-  })
+export function submitFeedback(data: FeedbackRequest): Promise<void> {
+  return post<void>('/chat/feedback', data)
 }
 
 /**
  * 获取Token统计
  */
-export function getTokenStats(): AxiosPromise<TokenStatsVO> {
-  return request({
-    url: '/chat/stats',
-    method: 'get'
-  })
+export function getTokenStats(): Promise<TokenStatsVO> {
+  return get<TokenStatsVO>('/chat/stats')
 }
 
 /**
  * 删除会话
  */
-export function deleteSession(sessionId: string): AxiosPromise<void> {
-  return request({
-    url: `/chat/session/${sessionId}`,
-    method: 'delete'
-  })
+export function deleteSession(sessionId: string): Promise<void> {
+  return del<void>(`/chat/session/${sessionId}`)
 }
 
 /**
  * 创建新会话
  */
-export function createNewSession(): AxiosPromise<string> {
-  return request({
-    url: '/chat/new-session',
-    method: 'post'
-  })
+export function createNewSession(): Promise<string> {
+  return post<string>('/chat/new-session')
 }

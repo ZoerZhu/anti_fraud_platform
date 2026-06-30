@@ -3,9 +3,15 @@ package com.anti.service;
 import com.anti.entity.News;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 
+import java.util.List;
+
 public interface NewsService {
 
     IPage<News> getNewsPage(Integer pageNum, Integer pageSize, Long categoryId, String newsType, String keyword, Long userId);
+
+    IPage<News> getAdminNewsPage(Integer pageNum, Integer pageSize, Long categoryId, String newsType, String keyword, Integer status);
+
+    List<News> getRequiredNews(Integer limit, Long userId);
 
     News getNewsDetail(Long id, Long userId);
 

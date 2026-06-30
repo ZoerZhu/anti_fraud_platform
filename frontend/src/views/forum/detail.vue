@@ -116,7 +116,7 @@
               </button>
               <button class="comment-item__action" @click="openReply(comment)">回复</button>
               <button
-                v-if="comment.userId === currentUserId"
+                v-if="canDeleteComment(comment)"
                 class="comment-item__action comment-item__action--danger"
                 @click="deleteComment(comment.id)"
               >删除</button>
@@ -187,7 +187,7 @@
                       {{ child.likeCount }}
                     </button>
                     <button
-                      v-if="child.userId === currentUserId"
+                      v-if="canDeleteComment(child)"
                       class="comment-item__action comment-item__action--danger"
                       @click="deleteComment(child.id)"
                     >删除</button>
@@ -219,6 +219,7 @@ const userStore = useUserStore()
 
 const postId = computed(() => Number(route.params.id))
 const currentUserId = computed(() => userStore.userInfo?.id)
+const isAdmin = computed(() => userStore.isAdmin)
 
 const post = ref<PostVO | null>(null)
 const comments = ref<CommentVO[]>([])
@@ -244,19 +245,18 @@ const flatComments = computed(() => {
   return comments.value.filter(c => c.parentId === 0 || c.parentId === null)
 })
 
-const commentCount = computed(() => {
-  let count = 0
-  const countAll = (list: CommentVO[]) => {
-    for (const c of list) {
-      count++
-      if (c.children?.length) {
-        countAll(c.children)
-      }
-    }
+const countCommentTree = (list: CommentVO[]): number => {
+  return list.reduce((total, comment) => total + 1 + countCommentTree(comment.children || []), 0)
+}
+
+const syncComments = (nextComments: CommentVO[]) => {
+  comments.value = nextComments
+  if (post.value) {
+    post.value.commentCount = countCommentTree(nextComments)
   }
-  countAll(comments.value)
-  return count
-})
+}
+
+const commentCount = computed(() => countCommentTree(comments.value))
 
 const getTypeName = (type: string) => {
   const map: Record<string, string> = { experience: '经验', question: '问答', discussion: '讨论' }
@@ -278,12 +278,19 @@ const formatTime = (time: string) => {
   return time.slice(0, 10)
 }
 
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+  return fallback
+}
+
 const loadPost = async () => {
   try {
     const res = await getPostDetail(postId.value)
-    post.value = res.data
-  } catch {
-    ElMessage.error('加载帖子失败')
+    post.value = res
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '加载帖子失败'))
     router.back()
   }
 }
@@ -292,9 +299,9 @@ const loadComments = async () => {
   loadingComments.value = true
   try {
     const res = await getPostComments(postId.value)
-    comments.value = res.data
-  } catch {
-    ElMessage.error('加载评论失败')
+    syncComments(res)
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '加载评论失败'))
   } finally {
     loadingComments.value = false
   }
@@ -306,14 +313,14 @@ const toggleLike = async () => {
     if (post.value.isLiked) {
       await unlikePost(postId.value)
       post.value.isLiked = false
-      post.value.likeCount--
+      post.value.likeCount = Math.max(0, post.value.likeCount - 1)
     } else {
       await likePost(postId.value)
       post.value.isLiked = true
       post.value.likeCount++
     }
-  } catch {
-    ElMessage.error('操作失败')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '操作失败'))
   }
 }
 
@@ -322,14 +329,14 @@ const toggleCommentLike = async (comment: CommentVO) => {
     if (comment.isLiked) {
       await unlikeComment(comment.id)
       comment.isLiked = false
-      comment.likeCount--
+      comment.likeCount = Math.max(0, comment.likeCount - 1)
     } else {
       await likeComment(comment.id)
       comment.isLiked = true
       comment.likeCount++
     }
-  } catch {
-    ElMessage.error('操作失败')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '操作失败'))
   }
 }
 
@@ -350,10 +357,9 @@ const submitComment = async () => {
     })
     ElMessage.success('评论成功')
     commentText.value = ''
-    loadComments()
-    if (post.value) post.value.commentCount++
-  } catch {
-    ElMessage.error('评论失败')
+    await loadComments()
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '评论失败'))
   } finally {
     submitting.value = false
   }
@@ -369,6 +375,10 @@ const cancelReply = () => {
   replyText.value = ''
 }
 
+const canDeleteComment = (comment: CommentVO) => {
+  return comment.userId === currentUserId.value || isAdmin.value
+}
+
 const submitReply = async (parentId: number) => {
   if (!replyText.value.trim()) return
   submitting.value = true
@@ -381,10 +391,9 @@ const submitReply = async (parentId: number) => {
     ElMessage.success('回复成功')
     cancelReply()
     expandReplies(parentId)
-    loadComments()
-    if (post.value) post.value.commentCount++
-  } catch {
-    ElMessage.error('回复失败')
+    await loadComments()
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '回复失败'))
   } finally {
     submitting.value = false
   }
@@ -394,10 +403,9 @@ const deleteComment = async (commentId: number) => {
   try {
     await deleteCommentApi(commentId)
     ElMessage.success('删除成功')
-    loadComments()
-    if (post.value) post.value.commentCount--
-  } catch {
-    ElMessage.error('删除失败')
+    await loadComments()
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '删除失败'))
   }
 }
 

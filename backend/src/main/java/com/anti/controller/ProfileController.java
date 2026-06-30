@@ -7,6 +7,7 @@ import com.anti.security.LoginUser;
 import com.anti.service.ProfileService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -42,7 +43,7 @@ public class ProfileController {
 
     @PutMapping("/update")
     @Operation(summary = "更新用户画像")
-    public Result<Void> updateProfile(@RequestBody UpdateProfileRequest request, @AuthenticationPrincipal LoginUser loginUser) {
+    public Result<Void> updateProfile(@Valid @RequestBody UpdateProfileRequest request, @AuthenticationPrincipal LoginUser loginUser) {
         profileService.updateProfile(loginUser.getUserId(), request);
         return Result.success();
     }

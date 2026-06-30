@@ -1,5 +1,6 @@
 package com.anti.service.impl;
 
+import com.anti.common.BusinessException;
 import com.anti.entity.*;
 import com.anti.entity.dto.CreatePostRequest;
 import com.anti.entity.dto.UpdatePostRequest;
@@ -26,6 +27,9 @@ import java.util.stream.Collectors;
  */
 @Service
 public class ForumPostServiceImpl extends ServiceImpl<ForumPostMapper, ForumPost> implements ForumPostService {
+
+    private static final int MAX_PAGE_SIZE = 100;
+    private static final Set<String> ALLOWED_POST_TYPES = Set.of("experience", "question", "discussion");
 
     private final ForumPostMapper forumPostMapper;
     private final PostLikeMapper postLikeMapper;
@@ -56,17 +60,22 @@ public class ForumPostServiceImpl extends ServiceImpl<ForumPostMapper, ForumPost
 
     @Override
     public IPage<PostVO> getPostPage(int pageNum, int pageSize, String postType, String sortBy, String keyword, Long userId) {
-        Page<ForumPost> page = new Page<>(pageNum, pageSize);
+        int safePageNum = Math.max(1, pageNum);
+        int safePageSize = Math.max(1, Math.min(pageSize, MAX_PAGE_SIZE));
+        String normalizedPostType = normalizePostType(postType, true);
+        String normalizedKeyword = trimToNull(keyword);
+        String normalizedSortBy = normalizeSortBy(sortBy);
+        Page<ForumPost> page = new Page<>(safePageNum, safePageSize);
         IPage<ForumPost> postPage;
 
-        if (keyword != null && !keyword.isBlank()) {
-            postPage = forumPostMapper.searchByKeyword(page, keyword);
-        } else if ("like".equals(sortBy)) {
-            postPage = forumPostMapper.selectByTypeOrderByLike(page, postType);
-        } else if ("comment".equals(sortBy)) {
-            postPage = forumPostMapper.selectByTypeOrderByComment(page, postType);
+        if (normalizedKeyword != null) {
+            postPage = forumPostMapper.searchByKeyword(page, normalizedKeyword, normalizedPostType);
+        } else if ("like".equals(normalizedSortBy)) {
+            postPage = forumPostMapper.selectByTypeOrderByLike(page, normalizedPostType);
+        } else if ("comment".equals(normalizedSortBy)) {
+            postPage = forumPostMapper.selectByTypeOrderByComment(page, normalizedPostType);
         } else {
-            postPage = forumPostMapper.selectByTypeOrderByTime(page, postType);
+            postPage = forumPostMapper.selectByTypeOrderByTime(page, normalizedPostType);
         }
 
         return convertToPostVOPage(postPage, userId);
@@ -75,8 +84,8 @@ public class ForumPostServiceImpl extends ServiceImpl<ForumPostMapper, ForumPost
     @Override
     public PostVO getPostDetail(Long postId, Long userId) {
         ForumPost post = getById(postId);
-        if (post == null) {
-            throw new RuntimeException("帖子不存在");
+        if (!isAvailablePost(post)) {
+            throw new BusinessException(404, "帖子不存在");
         }
 
         forumPostMapper.incrementViewCount(postId);
@@ -92,11 +101,15 @@ public class ForumPostServiceImpl extends ServiceImpl<ForumPostMapper, ForumPost
     @Override
     @Transactional
     public PostVO createPost(CreatePostRequest request, Long authorId) {
+        String title = requireText(request.getTitle(), "帖子标题", 100);
+        String content = requireText(request.getContent(), "帖子内容", 10000);
+        String postType = normalizePostType(request.getPostType(), false);
+
         ForumPost post = new ForumPost();
         post.setUserId(authorId);
-        post.setTitle(request.getTitle());
-        post.setContent(request.getContent());
-        post.setPostType(request.getPostType() != null ? request.getPostType() : "experience");
+        post.setTitle(title);
+        post.setContent(content);
+        post.setPostType(postType);
         post.setTagIds(request.getTagIds());
         post.setViewCount(0);
         post.setLikeCount(0);
@@ -133,19 +146,16 @@ public class ForumPostServiceImpl extends ServiceImpl<ForumPostMapper, ForumPost
     public PostVO updatePost(Long postId, UpdatePostRequest request, Long userId) {
         ForumPost post = getById(postId);
         if (post == null) {
-            throw new RuntimeException("帖子不存在");
+            throw new BusinessException(404, "帖子不存在");
         }
         if (!post.getUserId().equals(userId)) {
-            throw new RuntimeException("无权限修改");
+            throw new BusinessException(403, "无权限修改");
         }
 
-        if (request.getTitle() != null) post.setTitle(request.getTitle());
-        if (request.getContent() != null) post.setContent(request.getContent());
-        if (request.getPostType() != null) post.setPostType(request.getPostType());
+        if (request.getTitle() != null) post.setTitle(requireText(request.getTitle(), "帖子标题", 100));
+        if (request.getContent() != null) post.setContent(requireText(request.getContent(), "帖子内容", 10000));
+        if (request.getPostType() != null) post.setPostType(normalizePostType(request.getPostType(), false));
         if (request.getTagIds() != null) post.setTagIds(request.getTagIds());
-        if (request.getStatus() != null) post.setStatus(request.getStatus());
-        if (request.getIsFeatured() != null) post.setIsFeatured(request.getIsFeatured());
-        if (request.getIsTop() != null) post.setIsTop(request.getIsTop());
         post.setUpdateTime(LocalDateTime.now());
 
         updateById(post);
@@ -157,12 +167,12 @@ public class ForumPostServiceImpl extends ServiceImpl<ForumPostMapper, ForumPost
     public void deletePost(Long postId, Long userId) {
         ForumPost post = getById(postId);
         if (post == null) {
-            throw new RuntimeException("帖子不存在");
+            throw new BusinessException(404, "帖子不存在");
         }
         if (!post.getUserId().equals(userId)) {
             User user = userMapper.selectById(userId);
             if (user == null || !"admin".equals(user.getRole())) {
-                throw new RuntimeException("无权限删除");
+                throw new BusinessException(403, "无权限删除");
             }
         }
 
@@ -191,13 +201,12 @@ public class ForumPostServiceImpl extends ServiceImpl<ForumPostMapper, ForumPost
     @Override
     @Transactional
     public void likePost(Long postId, Long userId) {
-        if (postLikeMapper.existsByPostIdAndUserId(postId, userId)) {
-            throw new RuntimeException("已点赞");
-        }
-
         ForumPost post = getById(postId);
-        if (post == null) {
-            throw new RuntimeException("帖子不存在");
+        if (!isAvailablePost(post)) {
+            throw new BusinessException(404, "帖子不存在");
+        }
+        if (postLikeMapper.existsByPostIdAndUserId(postId, userId)) {
+            throw new BusinessException(400, "已点赞");
         }
 
         PostLike postLike = new PostLike();
@@ -206,20 +215,24 @@ public class ForumPostServiceImpl extends ServiceImpl<ForumPostMapper, ForumPost
         postLike.setCreateTime(LocalDateTime.now());
         postLikeMapper.insert(postLike);
 
-        post.setLikeCount(post.getLikeCount() + 1);
+        post.setLikeCount(defaultInt(post.getLikeCount()) + 1);
         updateById(post);
     }
 
     @Override
     @Transactional
     public void unlikePost(Long postId, Long userId) {
-        postLikeMapper.delete(new LambdaQueryWrapper<PostLike>()
+        ForumPost post = getById(postId);
+        if (!isAvailablePost(post)) {
+            throw new BusinessException(404, "帖子不存在");
+        }
+
+        int deleted = postLikeMapper.delete(new LambdaQueryWrapper<PostLike>()
                 .eq(PostLike::getPostId, postId)
                 .eq(PostLike::getUserId, userId));
 
-        ForumPost post = getById(postId);
-        if (post != null && post.getLikeCount() > 0) {
-            post.setLikeCount(post.getLikeCount() - 1);
+        if (deleted > 0 && defaultInt(post.getLikeCount()) > 0) {
+            post.setLikeCount(defaultInt(post.getLikeCount()) - 1);
             updateById(post);
         }
     }
@@ -227,9 +240,10 @@ public class ForumPostServiceImpl extends ServiceImpl<ForumPostMapper, ForumPost
     @Override
     @Transactional
     public void setTop(Long postId, int isTop) {
+        validateSwitchValue(isTop, "是否置顶");
         ForumPost post = getById(postId);
         if (post == null) {
-            throw new RuntimeException("帖子不存在");
+            throw new BusinessException(404, "帖子不存在");
         }
         post.setIsTop(isTop);
         updateById(post);
@@ -238,9 +252,10 @@ public class ForumPostServiceImpl extends ServiceImpl<ForumPostMapper, ForumPost
     @Override
     @Transactional
     public void setFeatured(Long postId, int isFeatured) {
+        validateSwitchValue(isFeatured, "是否精选");
         ForumPost post = getById(postId);
         if (post == null) {
-            throw new RuntimeException("帖子不存在");
+            throw new BusinessException(404, "帖子不存在");
         }
         post.setIsFeatured(isFeatured);
         updateById(post);
@@ -248,6 +263,11 @@ public class ForumPostServiceImpl extends ServiceImpl<ForumPostMapper, ForumPost
 
     @Override
     public List<CommentVO> getPostComments(Long postId, Long userId) {
+        ForumPost post = getById(postId);
+        if (!isAvailablePost(post)) {
+            throw new BusinessException(404, "帖子不存在");
+        }
+
         List<Comment> allComments = commentMapper.selectList(
                 new LambdaQueryWrapper<Comment>()
                         .eq(Comment::getPostId, postId)
@@ -255,9 +275,7 @@ public class ForumPostServiceImpl extends ServiceImpl<ForumPostMapper, ForumPost
                         .orderByAsc(Comment::getCreateTime)
         );
 
-        ForumPost post = getById(postId);
-
-        Map<Long, List<CommentVO>> groupedComments = allComments.stream()
+        Map<Long, List<CommentVO>> groupedComments = safeList(allComments).stream()
                 .map(c -> convertToCommentVO(c, userId, post != null ? post.getUserId() : null))
                 .collect(Collectors.groupingBy(CommentVO::getParentId));
 
@@ -266,13 +284,78 @@ public class ForumPostServiceImpl extends ServiceImpl<ForumPostMapper, ForumPost
 
     @Override
     public IPage<PostVO> getUserPosts(Long userId, int pageNum, int pageSize) {
-        Page<ForumPost> page = new Page<>(pageNum, pageSize);
+        if (userId == null || userId <= 0) {
+            throw new BusinessException(400, "用户ID无效");
+        }
+        Page<ForumPost> page = new Page<>(Math.max(1, pageNum), Math.max(1, Math.min(pageSize, MAX_PAGE_SIZE)));
         IPage<ForumPost> postPage = page(page, new LambdaQueryWrapper<ForumPost>()
                 .eq(ForumPost::getUserId, userId)
                 .eq(ForumPost::getStatus, 1)
                 .orderByDesc(ForumPost::getCreateTime));
 
         return convertToPostVOPage(postPage, userId);
+    }
+
+    private void validateSwitchValue(int value, String fieldName) {
+        if (value != 0 && value != 1) {
+            throw new BusinessException(400, fieldName + "只能为0或1");
+        }
+    }
+
+    private String normalizePostType(String postType, boolean allowBlank) {
+        String normalized = trimToNull(postType);
+        if (normalized == null) {
+            if (allowBlank) {
+                return null;
+            }
+            return "experience";
+        }
+        if (!ALLOWED_POST_TYPES.contains(normalized)) {
+            throw new BusinessException(400, "帖子类型只能是experience、question或discussion");
+        }
+        return normalized;
+    }
+
+    private String normalizeSortBy(String sortBy) {
+        String normalized = trimToNull(sortBy);
+        if (normalized == null) {
+            return "time";
+        }
+        if (!Set.of("time", "like", "comment").contains(normalized)) {
+            throw new BusinessException(400, "排序方式只能是time、like或comment");
+        }
+        return normalized;
+    }
+
+    private String requireText(String value, String fieldName, int maxLength) {
+        String normalized = trimToNull(value);
+        if (normalized == null) {
+            throw new BusinessException(400, fieldName + "不能为空");
+        }
+        if (normalized.length() > maxLength) {
+            throw new BusinessException(400, fieldName + "不能超过" + maxLength + "个字符");
+        }
+        return normalized;
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private boolean isAvailablePost(ForumPost post) {
+        return post != null && Integer.valueOf(1).equals(post.getStatus());
+    }
+
+    private int defaultInt(Integer value) {
+        return value == null ? 0 : value;
+    }
+
+    private <T> List<T> safeList(List<T> values) {
+        return values == null ? Collections.emptyList() : values;
     }
 
     private List<CommentVO> buildCommentTree(Long parentId, Map<Long, List<CommentVO>> groupedComments) {

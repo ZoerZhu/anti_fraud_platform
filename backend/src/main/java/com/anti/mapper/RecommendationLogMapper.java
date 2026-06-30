@@ -2,6 +2,7 @@ package com.anti.mapper;
 
 import com.anti.entity.RecommendationLog;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -70,7 +71,7 @@ public interface RecommendationLogMapper extends BaseMapper<RecommendationLog> {
      * @param userId   用户ID
      * @param keepDays 保留天数
      */
-    @Select("DELETE FROM recommendation_log WHERE user_id = #{userId} " +
+    @Delete("DELETE FROM recommendation_log WHERE user_id = #{userId} " +
             "AND create_time < DATE_SUB(NOW(), INTERVAL #{keepDays} DAY)")
     void deleteOldRecords(@Param("userId") Long userId, @Param("keepDays") int keepDays);
 }

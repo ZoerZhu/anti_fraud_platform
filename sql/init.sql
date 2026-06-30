@@ -41,9 +41,6 @@ CREATE TABLE `sys_user` (
     INDEX `idx_create_time` (`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表';
 
-ALTER TABLE `sys_user`
-    ADD COLUMN `last_login_time` DATETIME NULL COMMENT '最后登录时间(成就连续学习统计)' AFTER `update_time`;
-
 -- 用户积分表
 CREATE TABLE `user_score` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
@@ -508,9 +505,24 @@ CREATE TABLE `department_statistics` (
 -- 10. 初始化数据
 -- =====================================================
 
--- 插入管理员账号 (密码: 123456 经过BCrypt加密)
-INSERT INTO `sys_user` (`username`, `password`, `nickname`, `role`, `status`) VALUES
-('admin', '$2a$10$XiwC71Y3ltBnetOwm/DuIOtNJlsCkp09h8gQi0DjEmVMQ2sokalPu', '系统管理员', 'admin', 1);
+-- 插入试运行账号 (密码均为: 123456，经过BCrypt加密)
+INSERT INTO `sys_user`
+    (`username`, `password`, `nickname`, `role`, `status`, `student_no`, `grade`, `major`)
+VALUES
+    ('admin', '$2a$10$XiwC71Y3ltBnetOwm/DuIOtNJlsCkp09h8gQi0DjEmVMQ2sokalPu', '系统管理员', 'admin', 1, NULL, NULL, NULL),
+    ('student001', '$2a$10$XiwC71Y3ltBnetOwm/DuIOtNJlsCkp09h8gQi0DjEmVMQ2sokalPu', '演示学生', 'student', 1, '20260001', '大一', '软件工程');
+
+-- 初始化演示学生积分和画像
+INSERT INTO `user_score` (`user_id`, `total_score`, `current_level`, `weekly_score`)
+SELECT `id`, 0, 1, 0
+FROM `sys_user`
+WHERE `username` = 'student001';
+
+INSERT INTO `user_profile`
+    (`user_id`, `grade`, `major`, `knowledge_level`, `lifecycle_stage`, `browse_count`, `register_days`)
+SELECT `id`, `grade`, `major`, 0, 'newbie', 0, 0
+FROM `sys_user`
+WHERE `username` = 'student001';
 
 -- 初始化资讯分类
 INSERT INTO `news_category` (`name`, `parent_id`, `sort_order`) VALUES
@@ -576,7 +588,3 @@ LEFT JOIN case_tag_relation r ON c.id = r.case_id
 LEFT JOIN case_tag t ON r.tag_id = t.id
 GROUP BY c.id;
 
--- 若 admin 已存在则更新密码，否则插入
-INSERT INTO sys_user (username, password, nickname, role, status) 
-VALUES ('admin', '$2a$10$XiwC71Y3ltBnetOwm/DuIOtNJlsCkp09h8gQi0DjEmVMQ2sokalPu', '系统管理员', 'admin', 1)
-ON DUPLICATE KEY UPDATE password = VALUES(password);

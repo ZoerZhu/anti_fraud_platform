@@ -74,7 +74,7 @@
           </div>
         </header>
 
-        <div class="article__content" v-html="caseData.content"></div>
+        <div class="article__content">{{ caseData.content }}</div>
 
         <section class="article__section" v-if="caseData.targetGrades || caseData.targetMajors">
           <h3 class="section__title">适用对象</h3>
@@ -183,6 +183,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { getCaseDetail, likeCase, unlikeCase, browseCase, getCasePage } from '@/api/case'
 
 const route = useRoute()
@@ -204,7 +205,11 @@ const fetchCaseDetail = async (options?: { silent?: boolean }) => {
   try {
     const id = Number(route.params.id)
     const res = await getCaseDetail(id)
-    caseData.value = res.data
+    if (!res) {
+      caseData.value = null
+      return
+    }
+    caseData.value = res
 
     // start browse timer - will send browse record with stayDuration on unmount
     if (!options?.silent && caseData.value) {
@@ -212,6 +217,7 @@ const fetchCaseDetail = async (options?: { silent?: boolean }) => {
     }
   } catch (error) {
     console.error('获取案例详情失败:', error)
+    caseData.value = null
   } finally {
     if (!options?.silent) loading.value = false
   }
@@ -220,7 +226,7 @@ const fetchCaseDetail = async (options?: { silent?: boolean }) => {
 const fetchRelatedCases = async () => {
   try {
     const res = await getCasePage({ pageNum: 1, pageSize: 5 })
-    const records = res.data?.records ?? []
+    const records = res.records ?? []
     const currentCaseId = Number(route.params.id)
     const safeCurrentCaseId = Number.isNaN(currentCaseId) ? -1 : currentCaseId
     relatedCases.value = records
@@ -245,6 +251,7 @@ const handleLike = async () => {
     await fetchCaseDetail({ silent: true })
   } catch (error) {
     console.error('点赞失败:', error)
+    ElMessage.error('点赞失败，请确认已登录且案例仍可访问')
   }
 }
 
@@ -470,15 +477,8 @@ watch(
     font-size: 15px;
     line-height: 1.8;
     color: var(--text-primary);
-
-    :deep(p) {
-      margin: 0 0 16px;
-    }
-
-    :deep(img) {
-      max-width: 100%;
-      border-radius: 8px;
-    }
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
   &__section {

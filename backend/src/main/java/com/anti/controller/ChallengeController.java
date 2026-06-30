@@ -13,11 +13,12 @@ import com.anti.entity.vo.ChallengeRecordVO;
 import com.anti.entity.vo.ChallengeResultVO;
 import com.anti.entity.vo.ChallengeStatsVO;
 import com.anti.entity.vo.ChallengeVO;
-import com.anti.security.JwtUtils;
+import com.anti.security.LoginUser;
 import com.anti.service.ChallengeService;
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -32,29 +33,26 @@ import java.util.stream.Collectors;
 public class ChallengeController {
 
     private final ChallengeService challengeService;
-    private final JwtUtils jwtUtils;
 
-    public ChallengeController(ChallengeService challengeService, JwtUtils jwtUtils) {
+    public ChallengeController(ChallengeService challengeService) {
         this.challengeService = challengeService;
-        this.jwtUtils = jwtUtils;
     }
 
     /**
      * 获取闯关关卡列表
      */
     @GetMapping("/list")
-    public Result<List<ChallengeVO>> getChallengeList(HttpServletRequest request) {
-        Long userId = getUserIdFromRequest(request);
-        return Result.success(challengeService.getChallengeList(userId));
+    public Result<List<ChallengeVO>> getChallengeList(@AuthenticationPrincipal LoginUser loginUser) {
+        return Result.success(challengeService.getChallengeList(requireLogin(loginUser)));
     }
 
     /**
      * 获取关卡详情
      */
     @GetMapping("/{id}")
-    public Result<ChallengeVO> getChallengeDetail(@PathVariable Long id, HttpServletRequest request) {
-        Long userId = getUserIdFromRequest(request);
-        return Result.success(challengeService.getChallengeDetail(id, userId));
+    public Result<ChallengeVO> getChallengeDetail(@PathVariable Long id,
+                                                  @AuthenticationPrincipal LoginUser loginUser) {
+        return Result.success(challengeService.getChallengeDetail(id, requireLogin(loginUser)));
     }
 
     /**
@@ -64,28 +62,25 @@ public class ChallengeController {
     public Result<IPage<ChallengeRecordVO>> getChallengeRecords(
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize,
-            HttpServletRequest request) {
-        Long userId = getUserIdFromRequest(request);
-        return Result.success(challengeService.getChallengeRecords(userId, pageNum, pageSize));
+            @AuthenticationPrincipal LoginUser loginUser) {
+        return Result.success(challengeService.getChallengeRecords(requireLogin(loginUser), pageNum, pageSize));
     }
 
     /**
      * 提交闯关答案
      */
     @PostMapping("/submit")
-    public Result<ChallengeResultVO> submitChallenge(@RequestBody SubmitChallengeRequest request,
-                                                     HttpServletRequest httpRequest) {
-        Long userId = getUserIdFromRequest(httpRequest);
-        return Result.success(challengeService.submitChallenge(request, userId));
+    public Result<ChallengeResultVO> submitChallenge(@Valid @RequestBody SubmitChallengeRequest request,
+                                                     @AuthenticationPrincipal LoginUser loginUser) {
+        return Result.success(challengeService.submitChallenge(request, requireLogin(loginUser)));
     }
 
     /**
      * 获取闯关进度统计
      */
     @GetMapping("/progress")
-    public Result<ChallengeProgressVO> getChallengeProgress(HttpServletRequest request) {
-        Long userId = getUserIdFromRequest(request);
-        return Result.success(challengeService.getChallengeProgress(userId));
+    public Result<ChallengeProgressVO> getChallengeProgress(@AuthenticationPrincipal LoginUser loginUser) {
+        return Result.success(challengeService.getChallengeProgress(requireLogin(loginUser)));
     }
 
     /**
@@ -93,7 +88,7 @@ public class ChallengeController {
      */
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
-    public Result<ChallengeVO> createChallenge(@RequestBody CreateChallengeRequest request) {
+    public Result<ChallengeVO> createChallenge(@Valid @RequestBody CreateChallengeRequest request) {
         return Result.success(challengeService.createChallenge(request));
     }
 
@@ -103,7 +98,7 @@ public class ChallengeController {
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public Result<ChallengeVO> updateChallenge(@PathVariable Long id,
-                                               @RequestBody UpdateChallengeRequest request) {
+                                               @Valid @RequestBody UpdateChallengeRequest request) {
         return Result.success(challengeService.updateChallenge(id, request));
     }
 
@@ -126,8 +121,9 @@ public class ChallengeController {
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize,
             @RequestParam(required = false) String keyword,
-            @RequestParam(required = false) String type) {
-        return Result.success(challengeService.getAdminChallengeList(pageNum, pageSize, keyword, type));
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) Integer status) {
+        return Result.success(challengeService.getAdminChallengeList(pageNum, pageSize, keyword, type, status));
     }
 
     /**
@@ -153,7 +149,7 @@ public class ChallengeController {
      */
     @PutMapping("/admin/batch/status")
     @PreAuthorize("hasRole('ADMIN')")
-    public Result<Void> batchUpdateStatus(@RequestBody BatchStatusRequest request) {
+    public Result<Void> batchUpdateStatus(@Valid @RequestBody BatchStatusRequest request) {
         challengeService.batchUpdateStatus(request.getChallengeIds(), request.getStatus());
         return Result.success();
     }
@@ -163,22 +159,15 @@ public class ChallengeController {
      */
     @DeleteMapping("/admin/batch")
     @PreAuthorize("hasRole('ADMIN')")
-    public Result<Void> batchDelete(@RequestBody BatchDeleteRequest request) {
+    public Result<Void> batchDelete(@Valid @RequestBody BatchDeleteRequest request) {
         challengeService.batchDelete(request.getChallengeIds());
         return Result.success();
     }
 
-    private Long getUserIdFromRequest(HttpServletRequest request) {
-        String token = request.getHeader("Authorization");
-        if (token != null && token.startsWith("Bearer ")) {
-            token = token.substring(7);
-            try {
-                return jwtUtils.getUserIdFromToken(token);
-            } catch (Exception e) {
-                // Token 无效/解析失败时不要抛 500，直接返回可读的业务错误
-                throw new BusinessException("Token解析失败，请重新登录");
-            }
+    private Long requireLogin(LoginUser loginUser) {
+        if (loginUser == null || loginUser.getUserId() == null) {
+            throw new BusinessException(401, "请先登录");
         }
-        throw new BusinessException("请先登录");
+        return loginUser.getUserId();
     }
 }

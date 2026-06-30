@@ -59,7 +59,7 @@
         </template>
       </el-table-column>
       <el-table-column prop="publishTime" label="发布时间" width="160" />
-      <el-table-column label="操作" width="200" fixed="right">
+      <el-table-column label="操作" width="260" fixed="right">
         <template #default="{ row }">
           <div class="admin-news__actions">
             <el-button size="small" @click="openEditor(row)">编辑</el-button>
@@ -77,6 +77,13 @@
               @click="handleToggleTop(row)"
             >
               {{ row.isTop ? '取消置顶' : '置顶' }}
+            </el-button>
+            <el-button
+              size="small"
+              :type="row.isMandatory ? 'primary' : 'default'"
+              @click="handleToggleMandatory(row)"
+            >
+              {{ row.isMandatory ? '取消必读' : '必读' }}
             </el-button>
             <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
           </div>
@@ -160,7 +167,7 @@
       </el-form>
       <template #footer>
         <el-button @click="editorVisible = false">取消</el-button>
-        <!-- <el-button @click="handleSaveDraft">保存草稿</el-button> -->
+        <el-button @click="handleSubmit(false)" :loading="submitLoading">保存草稿</el-button>
         <el-button type="primary" @click="handleSubmit" :loading="submitLoading">发布</el-button>
       </template>
     </el-dialog>
@@ -171,7 +178,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { Plus, Search, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import request from '@/utils/request'
+import { del, get, post, put } from '@/utils/request'
 import { getCategories } from '@/api/news'
 import { uploadImage } from '@/api/upload'
 import type { NewsCategory } from '@/api/news'
@@ -267,7 +274,7 @@ const handleFileChange = async (event: Event) => {
 
   try {
     const res = await uploadImage(file)
-    formData.coverImage = res.data
+    formData.coverImage = res
     uploadProgress.value = 100
     ElMessage.success('封面上传成功')
   } catch {
@@ -290,9 +297,9 @@ const loadNews = async () => {
     if (filterType.value) params.newsType = filterType.value
     if (keyword.value) params.keyword = keyword.value
 
-    const res = await request.get<{ data: { records: NewsItem[]; total: number } }>('/news/page', { params })
-    newsList.value = res.data.records
-    total.value = res.data.total
+    const res = await get<{ records: NewsItem[]; total: number }>('/news/admin/page', { params })
+    newsList.value = res.records
+    total.value = res.total
   } catch {
     // error handled by interceptor
   } finally {
@@ -303,7 +310,7 @@ const loadNews = async () => {
 const loadCategories = async () => {
   try {
     const res = await getCategories()
-    categories.value = res.data
+    categories.value = res
   } catch {
     // error handled by interceptor
   }
@@ -338,10 +345,6 @@ const openEditor = (row?: NewsItem) => {
   editorVisible.value = true
 }
 
-const handleSaveDraft = async () => {
-  await handleSubmit(false)
-}
-
 const handleSubmit = async (publish = true) => {
   if (!formRef.value) return
   
@@ -364,21 +367,21 @@ const handleSubmit = async (publish = true) => {
       }
       
       if (isEdit.value && editingId.value) {
-        await request.put(`/news/${editingId.value}`, data)
+        await put(`/news/${editingId.value}`, data)
         if (publish) {
-          await request.post(`/news/${editingId.value}/publish`)
+          await post(`/news/${editingId.value}/publish`)
         }
         ElMessage.success(publish ? '更新并发布成功' : '保存草稿成功')
       } else {
-        const res = await request.post<{ data: { id: number } }>('/news', data)
+        const res = await post<{ id: number }>('/news', data)
         if (publish) {
-          await request.post(`/news/${res.data.id}/publish`)
+          await post(`/news/${res.id}/publish`)
         }
         ElMessage.success(publish ? '发布成功' : '保存草稿成功')
       }
       
       editorVisible.value = false
-      loadNews()
+      await loadNews()
     } catch {
       // error handled by interceptor
     } finally {
@@ -389,9 +392,9 @@ const handleSubmit = async (publish = true) => {
 
 const handlePublish = async (row: NewsItem) => {
   try {
-    await request.post(`/news/${row.id}/publish`)
+    await post(`/news/${row.id}/publish`)
     ElMessage.success('发布成功')
-    loadNews()
+    await loadNews()
   } catch {
     // error handled by interceptor
   }
@@ -399,9 +402,19 @@ const handlePublish = async (row: NewsItem) => {
 
 const handleToggleTop = async (row: NewsItem) => {
   try {
-    await request.put(`/news/${row.id}/top`, null, { params: { isTop: row.isTop === 1 ? 0 : 1 } })
+    await put(`/news/${row.id}/top`, null, { params: { isTop: row.isTop === 1 ? 0 : 1 } })
     ElMessage.success(row.isTop === 1 ? '已取消置顶' : '已设为置顶')
-    loadNews()
+    await loadNews()
+  } catch {
+    // error handled by interceptor
+  }
+}
+
+const handleToggleMandatory = async (row: NewsItem) => {
+  try {
+    await put(`/news/${row.id}/mandatory`, null, { params: { isMandatory: row.isMandatory === 1 ? 0 : 1 } })
+    ElMessage.success(row.isMandatory === 1 ? '已取消必读' : '已设为必读')
+    await loadNews()
   } catch {
     // error handled by interceptor
   }
@@ -414,9 +427,9 @@ const handleDelete = async (row: NewsItem) => {
       cancelButtonText: '取消',
       type: 'warning'
     })
-    await request.delete(`/news/${row.id}`)
+    await del(`/news/${row.id}`)
     ElMessage.success('删除成功')
-    loadNews()
+    await loadNews()
   } catch {
     // error handled by interceptor
   }

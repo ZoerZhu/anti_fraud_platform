@@ -1,5 +1,6 @@
 package com.anti.service.impl;
 
+import com.anti.common.BusinessException;
 import com.anti.entity.*;
 import com.anti.entity.dto.CreateCaseRequest;
 import com.anti.entity.dto.UpdateCaseRequest;
@@ -39,6 +40,9 @@ import java.util.stream.Collectors;
 public class FraudCaseServiceImpl extends ServiceImpl<FraudCaseMapper, FraudCase> implements FraudCaseService {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final int MAX_PAGE_SIZE = 50;
+    private static final int MAX_HOT_CASE_LIMIT = 50;
+    private static final int MAX_STAY_DURATION_SECONDS = 7200;
 
     private final CaseTagMapper caseTagMapper;
     private final CaseTagRelationMapper caseTagRelationMapper;
@@ -72,37 +76,20 @@ public class FraudCaseServiceImpl extends ServiceImpl<FraudCaseMapper, FraudCase
 
     @Override
     public IPage<CaseVO> getCasePage(int pageNum, int pageSize, Long tagId, String keyword) {
-        Page<FraudCase> page = new Page<>(pageNum, pageSize);
-        IPage<FraudCase> casePage;
+        return queryCasePage(pageNum, pageSize, tagId, keyword, 1);
+    }
 
-        if (tagId != null) {
-            casePage = baseMapper.selectCasesByTagId(page, tagId);
-        } else if (keyword != null && !keyword.isBlank()) {
-            casePage = page(page, new LambdaQueryWrapper<FraudCase>()
-                    .eq(FraudCase::getStatus, 1)
-                    .like(FraudCase::getTitle, keyword)
-                    .orderByDesc(FraudCase::getIsFeatured)
-                    .orderByDesc(FraudCase::getWilsonScore)
-                    .orderByDesc(FraudCase::getPublishTime));
-        } else {
-            casePage = page(page, new LambdaQueryWrapper<FraudCase>()
-                    .eq(FraudCase::getStatus, 1)
-                    .orderByDesc(FraudCase::getIsFeatured)
-                    .orderByDesc(FraudCase::getWilsonScore)
-                    .orderByDesc(FraudCase::getPublishTime));
+    @Override
+    public IPage<CaseVO> getAdminCasePage(int pageNum, int pageSize, Long tagId, String keyword, Integer status) {
+        if (status != null && status != 0 && status != 1) {
+            throw new BusinessException("状态只能为0或1");
         }
-
-        return convertToCaseVOPage(casePage);
+        return queryCasePage(pageNum, pageSize, tagId, keyword, status);
     }
 
     @Override
     public CaseVO getCaseDetail(Long caseId, Long userId) {
-        FraudCase caseEntity = getById(caseId);
-        if (caseEntity == null) {
-            // 案例不存在时返回 null，让控制层返回 code=200 + data=null，
-            // 前端按“案例不存在”状态渲染，避免接口直接抛 500。
-            return null;
-        }
+        FraudCase caseEntity = requirePublishedCase(caseId);
         CaseVO caseVO = convertToCaseVO(caseEntity);
         if (userId != null) {
             caseVO.setIsLiked(caseLikeMapper.existsByCaseIdAndUserId(caseId, userId));
@@ -114,21 +101,24 @@ public class FraudCaseServiceImpl extends ServiceImpl<FraudCaseMapper, FraudCase
     @Transactional
     public CaseVO createCase(CreateCaseRequest request, Long authorId) {
         FraudCase fraudCase = new FraudCase();
-        fraudCase.setTitle(request.getTitle());
-        fraudCase.setCaseType(request.getCaseType());
-        fraudCase.setContent(request.getContent());
+        fraudCase.setTitle(trimToNull(request.getTitle()));
+        fraudCase.setCaseType(trimToNull(request.getCaseType()));
+        fraudCase.setContent(trimToNull(request.getContent()));
         fraudCase.setScripts(request.getScripts());
         fraudCase.setTargetGrades(request.getTargetGrades());
         fraudCase.setTargetMajors(request.getTargetMajors());
         fraudCase.setDifficultyLevel(request.getDifficultyLevel() != null ? request.getDifficultyLevel() : 1);
         fraudCase.setRiskScore(request.getRiskScore() != null ? request.getRiskScore() : BigDecimal.ZERO);
-        fraudCase.setStatus(1);
-        fraudCase.setIsFeatured(0);
+        fraudCase.setStatus(request.getStatus() != null ? request.getStatus() : 0);
+        fraudCase.setIsFeatured(request.getIsFeatured() != null ? request.getIsFeatured() : 0);
         fraudCase.setViewCount(0);
         fraudCase.setLikeCount(0);
         fraudCase.setLikeRate(BigDecimal.ZERO);
         fraudCase.setWilsonScore(BigDecimal.ZERO);
-        fraudCase.setPublishTime(LocalDateTime.now());
+        if (fraudCase.getStatus() == 1) {
+            validatePublishable(fraudCase);
+            fraudCase.setPublishTime(LocalDateTime.now());
+        }
 
         save(fraudCase);
 
@@ -142,20 +132,25 @@ public class FraudCaseServiceImpl extends ServiceImpl<FraudCaseMapper, FraudCase
     @Override
     @Transactional
     public CaseVO updateCase(Long caseId, UpdateCaseRequest request) {
-        FraudCase fraudCase = getById(caseId);
-        if (fraudCase == null) {
-            throw new RuntimeException("案例不存在");
-        }
+        FraudCase fraudCase = requireCase(caseId);
 
-        if (request.getTitle() != null) fraudCase.setTitle(request.getTitle());
-        if (request.getCaseType() != null) fraudCase.setCaseType(request.getCaseType());
-        if (request.getContent() != null) fraudCase.setContent(request.getContent());
+        if (request.getTitle() != null) fraudCase.setTitle(requireNotBlank(request.getTitle(), "案例标题不能为空"));
+        if (request.getCaseType() != null) fraudCase.setCaseType(requireNotBlank(request.getCaseType(), "案例类型不能为空"));
+        if (request.getContent() != null) fraudCase.setContent(requireNotBlank(request.getContent(), "案例内容不能为空"));
         if (request.getScripts() != null) fraudCase.setScripts(request.getScripts());
         if (request.getTargetGrades() != null) fraudCase.setTargetGrades(request.getTargetGrades());
         if (request.getTargetMajors() != null) fraudCase.setTargetMajors(request.getTargetMajors());
         if (request.getDifficultyLevel() != null) fraudCase.setDifficultyLevel(request.getDifficultyLevel());
         if (request.getRiskScore() != null) fraudCase.setRiskScore(request.getRiskScore());
-        if (request.getStatus() != null) fraudCase.setStatus(request.getStatus());
+        if (request.getStatus() != null) {
+            fraudCase.setStatus(request.getStatus());
+            if (request.getStatus() == 1) {
+                validatePublishable(fraudCase);
+                if (fraudCase.getPublishTime() == null) {
+                    fraudCase.setPublishTime(LocalDateTime.now());
+                }
+            }
+        }
         if (request.getIsFeatured() != null) fraudCase.setIsFeatured(request.getIsFeatured());
 
         updateById(fraudCase);
@@ -174,17 +169,17 @@ public class FraudCaseServiceImpl extends ServiceImpl<FraudCaseMapper, FraudCase
     @Override
     @Transactional
     public void deleteCase(Long caseId) {
+        requireCase(caseId);
         caseTagRelationMapper.delete(new LambdaQueryWrapper<CaseTagRelation>().eq(CaseTagRelation::getCaseId, caseId));
         removeById(caseId);
+        cacheRefreshService.handleDeleteEvent("case", caseId);
     }
 
     @Override
     @Transactional
     public void publishCase(Long caseId) {
-        FraudCase fraudCase = getById(caseId);
-        if (fraudCase == null) {
-            throw new RuntimeException("案例不存在");
-        }
+        FraudCase fraudCase = requireCase(caseId);
+        validatePublishable(fraudCase);
         fraudCase.setStatus(1);
         fraudCase.setPublishTime(LocalDateTime.now());
         updateById(fraudCase);
@@ -196,10 +191,10 @@ public class FraudCaseServiceImpl extends ServiceImpl<FraudCaseMapper, FraudCase
     @Override
     @Transactional
     public void setFeatured(Long caseId, int isFeatured) {
-        FraudCase fraudCase = getById(caseId);
-        if (fraudCase == null) {
-            throw new RuntimeException("案例不存在");
+        if (isFeatured != 0 && isFeatured != 1) {
+            throw new BusinessException("精选状态只能为0或1");
         }
+        FraudCase fraudCase = requireCase(caseId);
         fraudCase.setIsFeatured(isFeatured);
         updateById(fraudCase);
     }
@@ -209,21 +204,14 @@ public class FraudCaseServiceImpl extends ServiceImpl<FraudCaseMapper, FraudCase
     public void likeCase(Long caseId, Long userId) {
         if (userId == null) {
             // 前端需要登录后才能点赞；userId 为空时直接中止，避免数据库约束触发 500
-            throw new com.anti.common.BusinessException(401, "请先登录后再点赞");
+            throw new BusinessException(401, "请先登录后再点赞");
         }
+        FraudCase fraudCase = requirePublishedCase(caseId);
         if (caseLikeMapper.existsByCaseIdAndUserId(caseId, userId)) {
             // 已点赞：接口设计为幂等，避免抛 RuntimeException 导致前端收到 500
-            FraudCase fraudCase = getById(caseId);
-            if (fraudCase != null) {
-                int prevLikeCount = fraudCase.getLikeCount() == null ? 0 : fraudCase.getLikeCount();
-                updateCaseLikeStats(caseId, fraudCase.getViewCount(), prevLikeCount);
-            }
+            int prevLikeCount = fraudCase.getLikeCount() == null ? 0 : fraudCase.getLikeCount();
+            updateCaseLikeStats(caseId, fraudCase.getViewCount(), prevLikeCount);
             return;
-        }
-
-        FraudCase fraudCase = getById(caseId);
-        if (fraudCase == null) {
-            throw new RuntimeException("案例不存在");
         }
 
         int prevLikeCount = fraudCase.getLikeCount() == null ? 0 : fraudCase.getLikeCount();
@@ -247,46 +235,48 @@ public class FraudCaseServiceImpl extends ServiceImpl<FraudCaseMapper, FraudCase
     public void unlikeCase(Long caseId, Long userId) {
         if (userId == null) {
             // 前端取消点赞也必须登录；避免 userId 空导致数据库异常
-            throw new com.anti.common.BusinessException(401, "请先登录后再取消点赞");
+            throw new BusinessException(401, "请先登录后再取消点赞");
         }
+        FraudCase fraudCase = requirePublishedCase(caseId);
 
         // 已取消点赞：幂等返回，避免 -1 重复扣减
         if (!caseLikeMapper.existsByCaseIdAndUserId(caseId, userId)) {
             return;
         }
 
-        FraudCase fraudCase = getById(caseId);
-        int prevLikeCount = (fraudCase == null || fraudCase.getLikeCount() == null) ? 0 : fraudCase.getLikeCount();
+        int prevLikeCount = fraudCase.getLikeCount() == null ? 0 : fraudCase.getLikeCount();
 
         caseLikeMapper.delete(new LambdaQueryWrapper<CaseLike>()
                 .eq(CaseLike::getCaseId, caseId)
                 .eq(CaseLike::getUserId, userId));
 
         // 后端点赞数显式同步 -1（不会低于 0）
-        if (fraudCase != null) {
-            updateCaseLikeStats(caseId, fraudCase.getViewCount(), Math.max(0, prevLikeCount - 1));
-        }
+        updateCaseLikeStats(caseId, fraudCase.getViewCount(), Math.max(0, prevLikeCount - 1));
     }
 
     @Override
     @Transactional
     public void browseCase(Long caseId, Long userId, int stayDuration) {
-        if (caseId == null) return;
+        FraudCase fraudCase = requirePublishedCase(caseId);
+        int safeStayDuration = clampStayDuration(stayDuration);
 
         // 浏览量本身不依赖登录，尽量保证页面展示逻辑可用
-        baseMapper.incrementViewCount(caseId);
+        baseMapper.incrementViewCount(fraudCase.getId());
+        if (userId != null) {
+            cacheRefreshService.handleBrowseEvent(userId, "case", fraudCase.getId());
+        }
 
         // case_browse_log.user_id 在数据库里是 NOT NULL 的；当 token 解析不到 userId 时直接跳过写入，
         // 避免触发约束异常导致接口返回 500。
         if (userId == null) {
-            log.warn("跳过写入案例浏览记录：userId 为空 (caseId={}, stayDuration={})", caseId, stayDuration);
+            log.warn("跳过写入案例浏览记录：userId 为空 (caseId={}, stayDuration={})", caseId, safeStayDuration);
             return;
         }
 
         CaseBrowseLog browseLog = new CaseBrowseLog();
         browseLog.setCaseId(caseId);
         browseLog.setUserId(userId);
-        browseLog.setStayDuration(Math.max(0, stayDuration));
+        browseLog.setStayDuration(safeStayDuration);
 
         int existedBefore = caseBrowseLogMapper.countByUserIdAndCaseId(userId, caseId);
         try {
@@ -317,7 +307,7 @@ public class FraudCaseServiceImpl extends ServiceImpl<FraudCaseMapper, FraudCase
             log.warn("案例浏览成就校验失败 (caseId={}, userId={}): {}", caseId, userId, e.getMessage(), e);
         }
         try {
-            int knowledgeGain = Math.max(1, stayDuration / 30);
+            int knowledgeGain = Math.max(1, safeStayDuration / 30);
             knowledgeGain = Math.min(knowledgeGain, 5);
             var profile = profileService.getProfileByUserId(userId);
             int newLevel = Math.min(100, (profile.getKnowledgeLevel() != null ? profile.getKnowledgeLevel() : 0) + knowledgeGain);
@@ -330,7 +320,10 @@ public class FraudCaseServiceImpl extends ServiceImpl<FraudCaseMapper, FraudCase
 
     @Override
     public IPage<CaseBrowseVO> getBrowseHistory(Long userId, int pageNum, int pageSize) {
-        Page<CaseBrowseLog> page = new Page<>(pageNum, pageSize);
+        if (userId == null) {
+            throw new BusinessException(401, "请先登录后查看浏览记录");
+        }
+        Page<CaseBrowseLog> page = new Page<>(normalizePageNum(pageNum), normalizePageSize(pageSize));
         IPage<CaseBrowseLog> logPage = caseBrowseLogMapper.selectByUserId(page, userId);
 
         List<CaseBrowseVO> voList = new ArrayList<>();
@@ -359,7 +352,8 @@ public class FraudCaseServiceImpl extends ServiceImpl<FraudCaseMapper, FraudCase
 
     @Override
     public List<CaseVO> getHotCases(int limit) {
-        List<FraudCase> hotCases = baseMapper.selectHotCases(limit);
+        int safeLimit = Math.max(1, Math.min(limit, MAX_HOT_CASE_LIMIT));
+        List<FraudCase> hotCases = baseMapper.selectHotCases(safeLimit);
         return hotCases.stream().map(this::convertToCaseVO).collect(Collectors.toList());
     }
 
@@ -369,7 +363,8 @@ public class FraudCaseServiceImpl extends ServiceImpl<FraudCaseMapper, FraudCase
      */
     @Override
     public double calculateWilsonScore(int positive, int total) {
-        if (total == 0) return 0;
+        if (positive <= 0 || total <= 0) return 0;
+        positive = Math.min(positive, total);
         double z = 1.645;
         double phat = (double) positive / total;
         double denominator = 1 + (z * z / total);
@@ -427,8 +422,114 @@ public class FraudCaseServiceImpl extends ServiceImpl<FraudCaseMapper, FraudCase
         };
     }
 
+    private IPage<CaseVO> queryCasePage(int pageNum, int pageSize, Long tagId, String keyword, Integer status) {
+        Page<FraudCase> page = new Page<>(normalizePageNum(pageNum), normalizePageSize(pageSize));
+        LambdaQueryWrapper<FraudCase> wrapper = new LambdaQueryWrapper<>();
+
+        if (status != null) {
+            wrapper.eq(FraudCase::getStatus, status);
+        }
+
+        String normalizedKeyword = trimToNull(keyword);
+        if (normalizedKeyword != null) {
+            wrapper.and(q -> q.like(FraudCase::getTitle, normalizedKeyword)
+                    .or()
+                    .like(FraudCase::getCaseType, normalizedKeyword));
+        }
+
+        if (tagId != null) {
+            List<Long> caseIds = baseMapper.findCaseIdsByTagId(tagId);
+            if (caseIds == null || caseIds.isEmpty()) {
+                Page<CaseVO> emptyPage = new Page<>(page.getCurrent(), page.getSize(), 0);
+                emptyPage.setRecords(Collections.emptyList());
+                return emptyPage;
+            }
+            wrapper.in(FraudCase::getId, caseIds);
+        }
+
+        wrapper.orderByDesc(FraudCase::getIsFeatured)
+                .orderByDesc(FraudCase::getWilsonScore)
+                .orderByDesc(FraudCase::getViewCount)
+                .orderByDesc(FraudCase::getPublishTime)
+                .orderByDesc(FraudCase::getCreateTime);
+
+        return convertToCaseVOPage(page(page, wrapper));
+    }
+
+    private FraudCase requireCase(Long caseId) {
+        if (caseId == null) {
+            throw new BusinessException(404, "案例不存在");
+        }
+        FraudCase fraudCase = getById(caseId);
+        if (fraudCase == null) {
+            throw new BusinessException(404, "案例不存在");
+        }
+        return fraudCase;
+    }
+
+    private FraudCase requirePublishedCase(Long caseId) {
+        FraudCase fraudCase = requireCase(caseId);
+        if (!Objects.equals(fraudCase.getStatus(), 1)) {
+            throw new BusinessException(404, "案例不存在或已下线");
+        }
+        return fraudCase;
+    }
+
+    private void validatePublishable(FraudCase fraudCase) {
+        requireNotBlank(fraudCase.getTitle(), "案例标题不能为空");
+        requireNotBlank(fraudCase.getCaseType(), "案例类型不能为空");
+        requireNotBlank(fraudCase.getContent(), "案例内容不能为空");
+        Integer difficultyLevel = fraudCase.getDifficultyLevel();
+        if (difficultyLevel == null || difficultyLevel < 1 || difficultyLevel > 5) {
+            throw new BusinessException("难度等级必须在1到5之间");
+        }
+        BigDecimal riskScore = fraudCase.getRiskScore();
+        if (riskScore == null || riskScore.compareTo(BigDecimal.ZERO) < 0 || riskScore.compareTo(BigDecimal.TEN) > 0) {
+            throw new BusinessException("风险评分必须在0到10之间");
+        }
+    }
+
+    private String requireNotBlank(String value, String message) {
+        String normalized = trimToNull(value);
+        if (normalized == null) {
+            throw new BusinessException(message);
+        }
+        return normalized;
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private int normalizePageNum(int pageNum) {
+        return Math.max(1, pageNum);
+    }
+
+    private int normalizePageSize(int pageSize) {
+        return Math.max(1, Math.min(pageSize, MAX_PAGE_SIZE));
+    }
+
+    private int clampStayDuration(int stayDuration) {
+        return Math.max(0, Math.min(stayDuration, MAX_STAY_DURATION_SECONDS));
+    }
+
     private void saveTagRelations(Long caseId, List<Long> tagIds) {
-        for (Long tagId : tagIds) {
+        List<Long> distinctTagIds = tagIds.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (distinctTagIds.isEmpty()) {
+            return;
+        }
+        List<CaseTag> existingTags = caseTagMapper.selectBatchIds(distinctTagIds);
+        if (existingTags.size() != distinctTagIds.size()) {
+            throw new BusinessException("存在无效案例标签");
+        }
+        for (Long tagId : distinctTagIds) {
             CaseTagRelation relation = new CaseTagRelation();
             relation.setCaseId(caseId);
             relation.setTagId(tagId);
@@ -469,16 +570,18 @@ public class FraudCaseServiceImpl extends ServiceImpl<FraudCaseMapper, FraudCase
         caseVO.setScripts(convertScriptsToJson(caseEntity.getScripts()));
         caseVO.setTargetGrades(caseEntity.getTargetGrades());
         caseVO.setTargetMajors(caseEntity.getTargetMajors());
-        caseVO.setDifficultyLevel(caseEntity.getDifficultyLevel());
-        caseVO.setDifficultyName(getDifficultyName(caseEntity.getDifficultyLevel()));
-        caseVO.setRiskScore(caseEntity.getRiskScore());
-        caseVO.setRiskLevel(getRiskLevel(caseEntity.getRiskScore().doubleValue()));
-        caseVO.setViewCount(caseEntity.getViewCount());
-        caseVO.setLikeCount(caseEntity.getLikeCount());
-        caseVO.setLikeRate(caseEntity.getLikeRate());
-        caseVO.setWilsonScore(caseEntity.getWilsonScore());
-        caseVO.setIsFeatured(caseEntity.getIsFeatured());
-        caseVO.setStatus(caseEntity.getStatus());
+        int difficultyLevel = caseEntity.getDifficultyLevel() == null ? 1 : caseEntity.getDifficultyLevel();
+        BigDecimal riskScore = caseEntity.getRiskScore() == null ? BigDecimal.ZERO : caseEntity.getRiskScore();
+        caseVO.setDifficultyLevel(difficultyLevel);
+        caseVO.setDifficultyName(getDifficultyName(difficultyLevel));
+        caseVO.setRiskScore(riskScore);
+        caseVO.setRiskLevel(getRiskLevel(riskScore.doubleValue()));
+        caseVO.setViewCount(caseEntity.getViewCount() == null ? 0 : caseEntity.getViewCount());
+        caseVO.setLikeCount(caseEntity.getLikeCount() == null ? 0 : caseEntity.getLikeCount());
+        caseVO.setLikeRate(caseEntity.getLikeRate() == null ? BigDecimal.ZERO : caseEntity.getLikeRate());
+        caseVO.setWilsonScore(caseEntity.getWilsonScore() == null ? BigDecimal.ZERO : caseEntity.getWilsonScore());
+        caseVO.setIsFeatured(caseEntity.getIsFeatured() == null ? 0 : caseEntity.getIsFeatured());
+        caseVO.setStatus(caseEntity.getStatus() == null ? 0 : caseEntity.getStatus());
         caseVO.setPublishTime(caseEntity.getPublishTime());
         caseVO.setCreateTime(caseEntity.getCreateTime());
         caseVO.setTags(getTagsByCaseId(caseEntity.getId()));

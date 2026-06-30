@@ -32,6 +32,8 @@ public class ProfileServiceImpl implements ProfileService {
 
     private static final int NEWBIE_BROWSE_THRESHOLD = 5;
     private static final int GROWING_BROWSE_THRESHOLD = 20;
+    private static final int MAX_TAGS = 20;
+    private static final int MAX_TAG_LENGTH = 30;
 
     @Override
     public UserProfile getProfileByUserId(Long userId) {
@@ -70,7 +72,7 @@ public class ProfileServiceImpl implements ProfileService {
         if (profile == null) {
             return;
         }
-        profile.setBrowseCount(profile.getBrowseCount() + 1);
+        profile.setBrowseCount((profile.getBrowseCount() == null ? 0 : profile.getBrowseCount()) + 1);
         profile.setUpdateTime(LocalDateTime.now());
         profileMapper.updateById(profile);
         updateLifecycleStage(userId);
@@ -97,13 +99,17 @@ public class ProfileServiceImpl implements ProfileService {
         if (profile == null) {
             return;
         }
+        String normalized = normalizeTag(weakPoint, "弱点标签");
         List<String> weakPoints = getWeakPoints(userId);
-        if (!weakPoints.contains(weakPoint)) {
-            weakPoints.add(weakPoint);
+        if (!weakPoints.contains(normalized)) {
+            if (weakPoints.size() >= MAX_TAGS) {
+                throw new BusinessException(400, "弱点标签最多添加" + MAX_TAGS + "个");
+            }
+            weakPoints.add(normalized);
             profile.setWeakPoints(JSONUtil.toJsonStr(weakPoints));
             profile.setUpdateTime(LocalDateTime.now());
             profileMapper.updateById(profile);
-            log.info("用户 {} 添加弱点标签: {}", userId, weakPoint);
+            log.info("用户 {} 添加弱点标签: {}", userId, normalized);
         }
     }
 
@@ -114,13 +120,17 @@ public class ProfileServiceImpl implements ProfileService {
         if (profile == null) {
             return;
         }
+        String normalized = normalizeTag(interestTag, "兴趣标签");
         List<String> interestTags = getInterestTags(userId);
-        if (!interestTags.contains(interestTag)) {
-            interestTags.add(interestTag);
+        if (!interestTags.contains(normalized)) {
+            if (interestTags.size() >= MAX_TAGS) {
+                throw new BusinessException(400, "兴趣标签最多添加" + MAX_TAGS + "个");
+            }
+            interestTags.add(normalized);
             profile.setInterestTags(JSONUtil.toJsonStr(interestTags));
             profile.setUpdateTime(LocalDateTime.now());
             profileMapper.updateById(profile);
-            log.info("用户 {} 添加兴趣标签: {}", userId, interestTag);
+            log.info("用户 {} 添加兴趣标签: {}", userId, normalized);
         }
     }
 
@@ -133,10 +143,11 @@ public class ProfileServiceImpl implements ProfileService {
         }
         String newStage = determineLifecycleStage(userId);
         if (!newStage.equals(profile.getLifecycleStage())) {
+            String oldStage = profile.getLifecycleStage();
             profile.setLifecycleStage(newStage);
             profile.setUpdateTime(LocalDateTime.now());
             profileMapper.updateById(profile);
-            log.info("用户 {} 生命周期阶段从 {} 更新为 {}", userId, profile.getLifecycleStage(), newStage);
+            log.info("用户 {} 生命周期阶段从 {} 更新为 {}", userId, oldStage, newStage);
         }
     }
 
@@ -148,7 +159,7 @@ public class ProfileServiceImpl implements ProfileService {
             return new ArrayList<>();
         }
         try {
-            return JSONUtil.toList(profile.getWeakPoints(), String.class);
+            return cleanTags(JSONUtil.toList(profile.getWeakPoints(), String.class));
         } catch (Exception e) {
             return new ArrayList<>();
         }
@@ -162,7 +173,7 @@ public class ProfileServiceImpl implements ProfileService {
             return new ArrayList<>();
         }
         try {
-            return JSONUtil.toList(profile.getInterestTags(), String.class);
+            return cleanTags(JSONUtil.toList(profile.getInterestTags(), String.class));
         } catch (Exception e) {
             return new ArrayList<>();
         }
@@ -181,7 +192,7 @@ public class ProfileServiceImpl implements ProfileService {
             log.warn("=== 用户不存在或注册时间为空，返回新手期 ===");
             return "newbie";
         }
-        long registerDays = ChronoUnit.DAYS.between(user.getCreateTime(), LocalDateTime.now());
+        long registerDays = Math.max(0, ChronoUnit.DAYS.between(user.getCreateTime(), LocalDateTime.now()));
         
         int caseBrowseCount = caseBrowseLogMapper.countDistinctCasesByUserId(userId);
         int newsBrowseCount = newsBrowseLogMapper.countDistinctNewsByUserId(userId);
@@ -211,12 +222,53 @@ public class ProfileServiceImpl implements ProfileService {
     public void initProfile(Long userId, String grade, String major) {
         profileMapper.initProfile(userId);
         UserProfile profile = profileMapper.selectByUserId(userId);
-        if (profile != null && grade != null) {
-            profile.setGrade(grade);
-            profile.setMajor(major);
-            profile.setUpdateTime(LocalDateTime.now());
-            profileMapper.updateById(profile);
+        if (profile != null) {
+            boolean changed = false;
+            if (grade != null) {
+                profile.setGrade(grade);
+                changed = true;
+            }
+            if (major != null) {
+                profile.setMajor(major);
+                changed = true;
+            }
+            if (changed) {
+                profile.setUpdateTime(LocalDateTime.now());
+                profileMapper.updateById(profile);
+            }
         }
         log.info("初始化用户 {} 画像，年级: {}, 专业: {}", userId, grade, major);
+    }
+
+    private static String normalizeTag(String tag, String label) {
+        if (tag == null || tag.trim().isEmpty()) {
+            throw new BusinessException(400, label + "不能为空");
+        }
+        String normalized = tag.trim();
+        if (normalized.length() > MAX_TAG_LENGTH) {
+            throw new BusinessException(400, label + "不能超过" + MAX_TAG_LENGTH + "个字符");
+        }
+        return normalized;
+    }
+
+    private static List<String> cleanTags(List<String> tags) {
+        List<String> result = new ArrayList<>();
+        if (tags == null) {
+            return result;
+        }
+        for (String tag : tags) {
+            if (tag == null) {
+                continue;
+            }
+            String normalized = tag.trim();
+            if (normalized.isEmpty() || result.contains(normalized)) {
+                continue;
+            }
+            result.add(normalized);
+            if (result.size() >= MAX_TAGS) {
+                break;
+            }
+        }
+        return result;
     }
 }

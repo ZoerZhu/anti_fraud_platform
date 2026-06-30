@@ -1,5 +1,7 @@
 package com.anti.security;
 
+import com.anti.entity.User;
+import com.anti.mapper.UserMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -24,6 +26,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtUtils jwtUtils;
     private final RedisTemplate<String, String> redisTemplate;
+    private final UserMapper userMapper;
 
     private static final String TOKEN_BLACKLIST_PREFIX = "token:blacklist:";
 
@@ -31,29 +34,48 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        try {
-            String jwt = extractJwtFromRequest(request);
-            if (StringUtils.hasText(jwt)) {
-                if (isTokenBlacklisted(jwt)) {
-                    log.debug("Token已被加入黑名单");
-                } else if (jwtUtils.validateToken(jwt)) {
-                    String username = jwtUtils.getUsernameFromToken(jwt);
-                    String role = jwtUtils.getRoleFromToken(jwt);
-                    Long userId = jwtUtils.getUserIdFromToken(jwt);
+        String jwt = extractJwtFromRequest(request);
+        if (StringUtils.hasText(jwt)) {
+            // Redis黑名单检查失败不应阻塞认证流程
+            boolean blacklisted = false;
+            try {
+                blacklisted = isTokenBlacklisted(jwt);
+            } catch (Exception e) {
+                log.warn("Redis黑名单检查异常，跳过黑名单验证: {}", e.getMessage());
+            }
 
-                    LoginUser loginUser = new LoginUser(userId, username, role);
-                    UsernamePasswordAuthenticationToken authentication =
-                        new UsernamePasswordAuthenticationToken(
-                            loginUser,
-                            null,
-                            Collections.singletonList(new SimpleGrantedAuthority("ROLE_" + role.toUpperCase()))
-                        );
+            if (blacklisted) {
+                log.debug("Token已被加入黑名单");
+                SecurityContextHolder.clearContext();
+            } else {
+                try {
+                    if (jwtUtils.validateToken(jwt)) {
+                        String username = jwtUtils.getUsernameFromToken(jwt);
+                        String role = jwtUtils.getRoleFromToken(jwt);
+                        Long userId = jwtUtils.getUserIdFromToken(jwt);
 
-                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                        User user = userMapper.selectById(userId);
+                        if (user == null || !Integer.valueOf(1).equals(user.getStatus())) {
+                            log.debug("Token用户不存在或已禁用: userId={}", userId);
+                            SecurityContextHolder.clearContext();
+                            filterChain.doFilter(request, response);
+                            return;
+                        }
+
+                        LoginUser loginUser = new LoginUser(userId, username, role);
+                        UsernamePasswordAuthenticationToken authentication =
+                            new UsernamePasswordAuthenticationToken(
+                                loginUser,
+                                null,
+                                Collections.singletonList(new SimpleGrantedAuthority("ROLE_" + role.toUpperCase()))
+                            );
+
+                        SecurityContextHolder.getContext().setAuthentication(authentication);
+                    }
+                } catch (Exception e) {
+                    log.error("JWT认证失败: {}", e.getMessage());
                 }
             }
-        } catch (Exception e) {
-            log.error("JWT认证失败: {}", e.getMessage());
         }
 
         filterChain.doFilter(request, response);

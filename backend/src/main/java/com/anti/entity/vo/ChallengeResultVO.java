@@ -1,5 +1,6 @@
 package com.anti.entity.vo;
 
+import com.anti.entity.UserChallengeRecord;
 import lombok.Data;
 
 /**
@@ -57,6 +58,11 @@ public class ChallengeResultVO {
      * 是否打破记录
      */
     private Boolean newRecord;
+
+    /**
+     * 本次答题明细
+     */
+    private UserChallengeRecord.AnswerDetail answerDetail;
 
     /**
      * 获取评价

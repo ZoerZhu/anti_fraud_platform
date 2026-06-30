@@ -133,8 +133,27 @@ const editForm = reactive({
   grade: '',
   major: ''
 })
+
+const validatePhone = (_rule: unknown, value: string, callback: (error?: Error) => void) => {
+  if (value && !/^1[3-9]\d{9}$/.test(value.trim())) {
+    callback(new Error('手机号格式不正确'))
+    return
+  }
+  callback()
+}
+
+const validateEmail = (_rule: unknown, value: string, callback: (error?: Error) => void) => {
+  if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())) {
+    callback(new Error('邮箱格式不正确'))
+    return
+  }
+  callback()
+}
+
 const editRules: FormRules = {
-  nickname: [{ required: true, message: '请输入昵称', trigger: 'blur' }]
+  nickname: [{ required: true, message: '请输入昵称', trigger: 'blur' }],
+  phone: [{ validator: validatePhone, trigger: 'blur' }],
+  email: [{ validator: validateEmail, trigger: 'blur' }]
 }
 
 function formatDate(val: string | undefined): string {
@@ -213,11 +232,11 @@ async function submitEdit() {
     editSubmitting.value = true
     try {
       const data: AdminUpdateUserRequest = {
-        nickname: editForm.nickname,
-        phone: editForm.phone || undefined,
-        email: editForm.email || undefined,
-        grade: editForm.grade || undefined,
-        major: editForm.major || undefined
+        nickname: editForm.nickname.trim(),
+        phone: editForm.phone.trim(),
+        email: editForm.email.trim(),
+        grade: editForm.grade.trim(),
+        major: editForm.major.trim()
       }
       await adminUpdateUser(editingUserId.value, data)
       ElMessage.success('更新成功')

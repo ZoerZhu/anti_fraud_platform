@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 /**
  * 评论Mapper接口
@@ -28,12 +29,12 @@ public interface CommentMapper extends BaseMapper<Comment> {
     /**
      * 增加点赞数
      */
-    @Select("UPDATE comment SET like_count = like_count + 1 WHERE id = #{commentId}")
-    void incrementLikeCount(@Param("commentId") Long commentId);
+    @Update("UPDATE comment SET like_count = like_count + 1 WHERE id = #{commentId}")
+    int incrementLikeCount(@Param("commentId") Long commentId);
 
     /**
      * 减少点赞数
      */
-    @Select("UPDATE comment SET like_count = like_count - 1 WHERE id = #{commentId} AND like_count > 0")
-    void decrementLikeCount(@Param("commentId") Long commentId);
+    @Update("UPDATE comment SET like_count = like_count - 1 WHERE id = #{commentId} AND like_count > 0")
+    int decrementLikeCount(@Param("commentId") Long commentId);
 }

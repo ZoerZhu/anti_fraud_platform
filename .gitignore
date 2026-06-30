@@ -11,6 +11,7 @@ venv/
 # Python
 __pycache__/
 *.py[cod]
+backend/target/
 
 # IDE
 .idea/

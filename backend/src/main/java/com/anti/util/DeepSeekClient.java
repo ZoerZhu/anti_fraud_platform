@@ -1,6 +1,7 @@
 package com.anti.util;
 
 import cn.hutool.http.HttpUtil;
+import cn.hutool.http.HttpResponse;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
@@ -34,6 +35,9 @@ public class DeepSeekClient {
     @Value("${deepseek.temperature:0.7}")
     private double temperature;
 
+    @Value("${deepseek.timeout-ms:15000}")
+    private int timeoutMs;
+
     /**
      * 发送聊天请求到DeepSeek
      *
@@ -44,6 +48,12 @@ public class DeepSeekClient {
      */
     public DeepSeekResponse chat(String systemPrompt, String userMessage, List<String[]> history) {
         DeepSeekResponse response = new DeepSeekResponse();
+
+        if (apiKey == null || apiKey.isBlank() || "填自己的apikey".equals(apiKey.trim())) {
+            response.setSuccess(false);
+            response.setErrorMessage("AI_API_KEY_MISSING");
+            return response;
+        }
 
         try {
             JSONObject requestBody = new JSONObject();
@@ -62,8 +72,15 @@ public class DeepSeekClient {
             // 添加历史对话
             if (history != null && !history.isEmpty()) {
                 for (String[] msg : history) {
+                    if (msg == null || msg.length < 2 || msg[0] == null || msg[1] == null || msg[1].isBlank()) {
+                        continue;
+                    }
+                    String role = msg[0].trim();
+                    if (!"user".equals(role) && !"assistant".equals(role)) {
+                        continue;
+                    }
                     JSONObject historyMsg = new JSONObject();
-                    historyMsg.set("role", msg[0]);
+                    historyMsg.set("role", role);
                     historyMsg.set("content", msg[1]);
                     messages.add(historyMsg);
                 }
@@ -82,20 +99,27 @@ public class DeepSeekClient {
             headers.put("Content-Type", "application/json");
             headers.put("Authorization", "Bearer " + apiKey);
 
-            String result = HttpUtil.createPost(apiUrl)
+            HttpResponse httpResponse = HttpUtil.createPost(apiUrl)
                     .headerMap(headers, false)
                     .body(requestBody.toString())
-                    .timeout(60000)
-                    .execute()
-                    .body();
+                    .timeout(resolveTimeoutMs())
+                    .execute();
 
-            logger.debug("DeepSeek API response: {}", result);
+            String result = httpResponse.body();
+            if (httpResponse.getStatus() < 200 || httpResponse.getStatus() >= 300) {
+                logger.warn("DeepSeek API returned non-success status: {}", httpResponse.getStatus());
+                response.setSuccess(false);
+                response.setErrorMessage("AI_SERVICE_UNAVAILABLE");
+                return response;
+            }
+
+            logger.debug("DeepSeek API response received, length={}", result != null ? result.length() : 0);
 
             JSONObject responseJson = JSONUtil.parseObj(result);
 
             if (responseJson.containsKey("error")) {
                 response.setSuccess(false);
-                response.setErrorMessage(responseJson.getStr("error", "未知错误"));
+                response.setErrorMessage("AI_SERVICE_UNAVAILABLE");
                 return response;
             }
 
@@ -117,12 +141,20 @@ public class DeepSeekClient {
             response.setSuccess(true);
 
         } catch (Exception e) {
-            logger.error("调用DeepSeek API失败", e);
+            logger.warn("调用DeepSeek API失败: {}", e.getClass().getSimpleName());
             response.setSuccess(false);
-            response.setErrorMessage("API调用失败: " + e.getMessage());
+            response.setErrorMessage("AI_SERVICE_UNAVAILABLE");
         }
 
         return response;
+    }
+
+    public String getModel() {
+        return model;
+    }
+
+    private int resolveTimeoutMs() {
+        return Math.max(1000, Math.min(timeoutMs, 30000));
     }
 
     /**

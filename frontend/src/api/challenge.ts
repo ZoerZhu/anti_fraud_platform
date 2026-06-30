@@ -1,5 +1,4 @@
-import request from '@/utils/request'
-import type { AxiosPromise } from 'axios'
+import { del, get, post, put } from '@/utils/request'
 
 export interface ChallengeContent {
   questions: ChallengeQuestion[]
@@ -104,6 +103,7 @@ export interface ChallengeResultVO {
   ratingDesc: string
   highestScore?: number
   newRecord?: boolean
+  answerDetail?: AnswerDetail
 }
 
 export interface ScenarioProgressVO {
@@ -186,21 +186,15 @@ export interface ScenarioDecisionRequest {
 /**
  * 获取闯关关卡列表
  */
-export function getChallengeList(): AxiosPromise<ChallengeVO[]> {
-  return request({
-    url: '/challenge/list',
-    method: 'get'
-  })
+export function getChallengeList(): Promise<ChallengeVO[]> {
+  return get<ChallengeVO[]>('/challenge/list')
 }
 
 /**
  * 获取关卡详情
  */
-export function getChallengeDetail(id: number): AxiosPromise<ChallengeVO> {
-  return request({
-    url: `/challenge/${id}`,
-    method: 'get'
-  })
+export function getChallengeDetail(id: number): Promise<ChallengeVO> {
+  return get<ChallengeVO>(`/challenge/${id}`)
 }
 
 /**
@@ -209,132 +203,89 @@ export function getChallengeDetail(id: number): AxiosPromise<ChallengeVO> {
 export function getChallengeRecords(params: {
   pageNum: number
   pageSize: number
-}): AxiosPromise<PageResult<ChallengeRecordVO>> {
-  return request({
-    url: '/challenge/records',
-    method: 'get',
-    params
-  })
+}): Promise<PageResult<ChallengeRecordVO>> {
+  return get<PageResult<ChallengeRecordVO>>('/challenge/records', { params })
 }
 
 /**
  * 提交闯关答案
  */
-export function submitChallenge(data: SubmitChallengeRequest): AxiosPromise<ChallengeResultVO> {
-  return request({
-    url: '/challenge/submit',
-    method: 'post',
-    data
-  })
+export function submitChallenge(data: SubmitChallengeRequest): Promise<ChallengeResultVO> {
+  return post<ChallengeResultVO>('/challenge/submit', data)
 }
 
 /**
  * 获取闯关进度统计
  */
-export function getChallengeProgress(): AxiosPromise<{
+export function getChallengeProgress(): Promise<{
   totalChallenges: number
   completedChallenges: number
   nextChallenges: ChallengeVO[]
 }> {
-  return request({
-    url: '/challenge/progress',
-    method: 'get'
-  })
+  return get('/challenge/progress')
 }
 
 /**
  * 开始情景模拟
  */
-export function startScenario(challengeId: number): AxiosPromise<ScenarioProgressVO> {
-  return request({
-    url: `/scenario/start/${challengeId}`,
-    method: 'post'
-  })
+export function startScenario(challengeId: number): Promise<ScenarioProgressVO> {
+  return post<ScenarioProgressVO>(`/scenario/start/${challengeId}`)
 }
 
 /**
  * 获取情景模拟进度
  */
-export function getScenarioProgress(challengeId: number): AxiosPromise<ScenarioProgressVO> {
-  return request({
-    url: `/scenario/progress/${challengeId}`,
-    method: 'get'
-  })
+export function getScenarioProgress(challengeId: number): Promise<ScenarioProgressVO> {
+  return get<ScenarioProgressVO>(`/scenario/progress/${challengeId}`)
 }
 
 /**
  * 做出决策
  */
-export function makeDecision(data: ScenarioDecisionRequest): AxiosPromise<ScenarioProgressVO> {
-  return request({
-    url: '/scenario/decision',
-    method: 'post',
-    data
-  })
+export function makeDecision(data: ScenarioDecisionRequest): Promise<ScenarioProgressVO> {
+  return post<ScenarioProgressVO>('/scenario/decision', data)
 }
 
 /**
  * 重置情景模拟
  */
-export function resetScenario(challengeId: number): AxiosPromise<void> {
-  return request({
-    url: `/scenario/reset/${challengeId}`,
-    method: 'post'
-  })
+export function resetScenario(challengeId: number): Promise<void> {
+  return post<void>(`/scenario/reset/${challengeId}`)
 }
 
 /**
  * 获取结局
  */
-export function getScenarioEnding(challengeId: number): AxiosPromise<ScenarioProgressVO> {
-  return request({
-    url: `/scenario/ending/${challengeId}`,
-    method: 'get'
-  })
+export function getScenarioEnding(challengeId: number): Promise<ScenarioProgressVO> {
+  return get<ScenarioProgressVO>(`/scenario/ending/${challengeId}`)
 }
 
 /**
  * 获取日排行榜
  */
-export function getDailyLeaderboard(limit: number = 20): AxiosPromise<LeaderboardVO[]> {
-  return request({
-    url: '/leaderboard/daily',
-    method: 'get',
-    params: { limit }
-  })
+export function getDailyLeaderboard(limit: number = 20): Promise<LeaderboardVO[]> {
+  return get<LeaderboardVO[]>('/leaderboard/daily', { params: { limit } })
 }
 
 /**
  * 获取周排行榜
  */
-export function getWeeklyLeaderboard(limit: number = 20): AxiosPromise<LeaderboardVO[]> {
-  return request({
-    url: '/leaderboard/weekly',
-    method: 'get',
-    params: { limit }
-  })
+export function getWeeklyLeaderboard(limit: number = 20): Promise<LeaderboardVO[]> {
+  return get<LeaderboardVO[]>('/leaderboard/weekly', { params: { limit } })
 }
 
 /**
  * 获取总排行榜
  */
-export function getAllTimeLeaderboard(limit: number = 20): AxiosPromise<LeaderboardVO[]> {
-  return request({
-    url: '/leaderboard/all',
-    method: 'get',
-    params: { limit }
-  })
+export function getAllTimeLeaderboard(limit: number = 20): Promise<LeaderboardVO[]> {
+  return get<LeaderboardVO[]>('/leaderboard/all', { params: { limit } })
 }
 
 /**
  * 获取用户排名
  */
-export function getUserRank(periodType: string = 'daily'): AxiosPromise<LeaderboardVO> {
-  return request({
-    url: '/leaderboard/user-rank',
-    method: 'get',
-    params: { periodType }
-  })
+export function getUserRank(periodType: string = 'daily'): Promise<LeaderboardVO> {
+  return get<LeaderboardVO>('/leaderboard/user-rank', { params: { periodType } })
 }
 
 // ============ 管理员接口 ============
@@ -367,43 +318,29 @@ export interface ChallengeOverviewVO {
 /**
  * 获取关卡统计概览(管理员)
  */
-export function getChallengeOverview(): AxiosPromise<ChallengeOverviewVO> {
-  return request({
-    url: '/challenge/admin/overview',
-    method: 'get'
-  })
+export function getChallengeOverview(): Promise<ChallengeOverviewVO> {
+  return get<ChallengeOverviewVO>('/challenge/admin/overview')
 }
 
 /**
  * 获取指定关卡的统计数据(管理员)
  */
-export function getChallengeStats(id: number): AxiosPromise<ChallengeStatsVO> {
-  return request({
-    url: `/challenge/admin/stats/${id}`,
-    method: 'get'
-  })
+export function getChallengeStats(id: number): Promise<ChallengeStatsVO> {
+  return get<ChallengeStatsVO>(`/challenge/admin/stats/${id}`)
 }
 
 /**
  * 批量启用/禁用关卡
  */
-export function batchUpdateChallengeStatus(challengeIds: number[], status: number): AxiosPromise<void> {
-  return request({
-    url: '/challenge/admin/batch/status',
-    method: 'put',
-    data: { challengeIds, status }
-  })
+export function batchUpdateChallengeStatus(challengeIds: number[], status: number): Promise<void> {
+  return put<void>('/challenge/admin/batch/status', { challengeIds, status })
 }
 
 /**
  * 批量删除关卡
  */
-export function batchDeleteChallenges(challengeIds: number[]): AxiosPromise<void> {
-  return request({
-    url: '/challenge/admin/batch',
-    method: 'delete',
-    data: { challengeIds }
-  })
+export function batchDeleteChallenges(challengeIds: number[]): Promise<void> {
+  return del<void>('/challenge/admin/batch', { data: { challengeIds } })
 }
 
 /**
@@ -414,12 +351,9 @@ export function getAdminChallengeList(params: {
   pageSize: number
   keyword?: string
   type?: string
-}): AxiosPromise<PageResult<ChallengeVO>> {
-  return request({
-    url: '/challenge/admin/list',
-    method: 'get',
-    params
-  })
+  status?: number
+}): Promise<PageResult<ChallengeVO>> {
+  return get<PageResult<ChallengeVO>>('/challenge/admin/list', { params })
 }
 
 /**
@@ -435,12 +369,8 @@ export function createChallenge(data: {
   scoreReward: number
   content?: ChallengeContent
   scripts?: ScenarioScript
-}): AxiosPromise<ChallengeVO> {
-  return request({
-    url: '/challenge',
-    method: 'post',
-    data
-  })
+}): Promise<ChallengeVO> {
+  return post<ChallengeVO>('/challenge', data)
 }
 
 /**
@@ -457,20 +387,13 @@ export function updateChallenge(id: number, data: {
   content?: ChallengeContent
   scripts?: ScenarioScript
   status?: number
-}): AxiosPromise<ChallengeVO> {
-  return request({
-    url: `/challenge/${id}`,
-    method: 'put',
-    data
-  })
+}): Promise<ChallengeVO> {
+  return put<ChallengeVO>(`/challenge/${id}`, data)
 }
 
 /**
  * 删除关卡(管理员)
  */
-export function deleteChallenge(id: number): AxiosPromise<void> {
-  return request({
-    url: `/challenge/${id}`,
-    method: 'delete'
-  })
+export function deleteChallenge(id: number): Promise<void> {
+  return del<void>(`/challenge/${id}`)
 }

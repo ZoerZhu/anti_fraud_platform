@@ -9,6 +9,7 @@ import com.anti.security.JwtUtils;
 import com.anti.service.FraudCaseService;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -42,6 +43,20 @@ public class CaseController {
     }
 
     /**
+     * 管理端分页查询案例列表
+     */
+    @GetMapping("/admin/page")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Result<IPage<CaseVO>> getAdminCasePage(
+            @RequestParam(defaultValue = "1") Integer pageNum,
+            @RequestParam(defaultValue = "10") Integer pageSize,
+            @RequestParam(required = false) Long tagId,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Integer status) {
+        return Result.success(fraudCaseService.getAdminCasePage(pageNum, pageSize, tagId, keyword, status));
+    }
+
+    /**
      * 获取案例详情
      */
     @GetMapping("/{id}")
@@ -55,7 +70,7 @@ public class CaseController {
      */
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
-    public Result<CaseVO> createCase(@RequestBody CreateCaseRequest request, HttpServletRequest httpRequest) {
+    public Result<CaseVO> createCase(@Valid @RequestBody CreateCaseRequest request, HttpServletRequest httpRequest) {
         Long authorId = getUserIdFromRequest(httpRequest);
         return Result.success(fraudCaseService.createCase(request, authorId));
     }
@@ -65,7 +80,7 @@ public class CaseController {
      */
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    public Result<CaseVO> updateCase(@PathVariable Long id, @RequestBody UpdateCaseRequest request) {
+    public Result<CaseVO> updateCase(@PathVariable Long id, @Valid @RequestBody UpdateCaseRequest request) {
         return Result.success(fraudCaseService.updateCase(id, request));
     }
 

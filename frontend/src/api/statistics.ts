@@ -1,6 +1,5 @@
-import request from '@/utils/request'
+import { get, post } from '@/utils/request'
 import axios from 'axios'
-import type { AxiosPromise } from 'axios'
 import type { AxiosRequestConfig } from 'axios'
 
 /**
@@ -124,95 +123,64 @@ export interface DashboardVO {
 /**
  * 获取看板数据
  */
-export function getDashboardData(): AxiosPromise<DashboardVO> {
-  return request({
-    url: '/statistics/dashboard',
-    method: 'get'
-  })
+export function getDashboardData(): Promise<DashboardVO> {
+  return get<DashboardVO>('/statistics/dashboard')
 }
 
 /**
  * 获取访问量趋势
  */
-export function getVisitTrend(days: number = 7): AxiosPromise<VisitTrendVO> {
-  return request({
-    url: '/statistics/visit/trend',
-    method: 'get',
-    params: { days }
-  })
+export function getVisitTrend(days: number = 7): Promise<VisitTrendVO> {
+  return get<VisitTrendVO>('/statistics/visit/trend', { params: { days } })
 }
 
 /**
  * 获取诈骗类型分布
  */
-export function getFraudTypeDistribution(): AxiosPromise<FraudTypeDistVO> {
-  return request({
-    url: '/statistics/fraud/types',
-    method: 'get'
-  })
+export function getFraudTypeDistribution(): Promise<FraudTypeDistVO> {
+  return get<FraudTypeDistVO>('/statistics/fraud/types')
 }
 
 /**
  * 获取高频诈骗类型TOP N
  */
-export function getTopFraudTypes(limit: number = 5): AxiosPromise<any[]> {
-  return request({
-    url: '/statistics/fraud/top',
-    method: 'get',
-    params: { limit }
-  })
+export function getTopFraudTypes(limit: number = 5): Promise<any[]> {
+  return get<any[]>('/statistics/fraud/top', { params: { limit } })
 }
 
 /**
  * 获取各院系测试得分统计
  */
-export function getDepartmentScores(): AxiosPromise<DepartmentScoreVO> {
-  return request({
-    url: '/statistics/department/scores',
-    method: 'get'
-  })
+export function getDepartmentScores(): Promise<DepartmentScoreVO> {
+  return get<DepartmentScoreVO>('/statistics/department/scores')
 }
 
 /**
  * 获取学生学习完成率统计
  */
-export function getCompletionRate(): AxiosPromise<any[]> {
-  return request({
-    url: '/statistics/completion/rate',
-    method: 'get'
-  })
+export function getCompletionRate(): Promise<any[]> {
+  return get<any[]>('/statistics/completion/rate')
 }
 
 /**
  * 获取TOP案例排行榜
  */
-export function getTopCases(limit: number = 10): AxiosPromise<TopCaseVO[]> {
-  return request({
-    url: '/statistics/cases/top',
-    method: 'get',
-    params: { limit }
-  })
+export function getTopCases(limit: number = 10): Promise<TopCaseVO[]> {
+  return get<TopCaseVO[]>('/statistics/cases/top', { params: { limit } })
 }
 
 /**
  * 获取用户活跃度热力图数据
  */
-export function getHourlyActivity(statDate?: string): AxiosPromise<HourlyActivityVO[]> {
-  return request({
-    url: '/statistics/activity/hourly',
-    method: 'get',
-    params: { statDate }
-  })
+export function getHourlyActivity(statDate?: string): Promise<HourlyActivityVO[]> {
+  return get<HourlyActivityVO[]>('/statistics/activity/hourly', { params: { statDate } })
 }
 
 /**
  * 手动刷新统计数据
  */
-export function refreshStatistics(): AxiosPromise<void> {
-  return request({
-    url: '/statistics/refresh',
-    method: 'post'
-  })
+export function refreshStatistics(): Promise<void> {
+  return post<void>('/statistics/refresh')
 }
 
 /**
@@ -226,7 +194,7 @@ export function exportDailyStatistics(params?: { startDate?: string; endDate?: s
 /**
  * 导出院系统计数据
  */
-export function exportDepartmentStatistics(params?: { statDate?: string }): Promise<void> {
+export function exportDepartmentStatistics(params?: { statDate?: string; startDate?: string; endDate?: string }): Promise<void> {
   const filename = `院系统计数据_${new Date().toISOString().split('T')[0]}.xlsx`
   return downloadFile('/statistics/export/department', filename, { params })
 }

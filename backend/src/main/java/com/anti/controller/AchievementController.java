@@ -10,6 +10,7 @@ import com.anti.service.AchievementService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -82,12 +83,18 @@ public class AchievementController {
     }
 
     @PostMapping("/unlock/{code}")
+    @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "手动解锁成就(管理员)")
     public Result<Void> unlockAchievement(@PathVariable String code, @AuthenticationPrincipal LoginUser loginUser) {
-        if (!"admin".equals(loginUser.getRole())) {
-            return Result.error(403, "权限不足");
-        }
         achievementService.unlockAchievement(loginUser.getUserId(), code);
+        return Result.success();
+    }
+
+    @PostMapping("/admin/users/{userId}/unlock/{code}")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "为指定用户解锁成就(管理员)")
+    public Result<Void> unlockAchievementForUser(@PathVariable Long userId, @PathVariable String code) {
+        achievementService.unlockAchievement(userId, code);
         return Result.success();
     }
 }

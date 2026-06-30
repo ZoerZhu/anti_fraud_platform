@@ -93,6 +93,7 @@
               <div class="message-footer">
                 <span class="message-time">{{ msg.time }}</span>
                 <template v-if="msg.role === 'assistant'">
+                  <span v-if="msg.fallback" class="fallback-status">服务降级</span>
                   <el-button
                     v-if="msg.feedback === undefined"
                     :icon="CircleCheck"
@@ -139,6 +140,8 @@
               v-model="inputText"
               type="textarea"
               :rows="2"
+              maxlength="2000"
+              show-word-limit
               resize="none"
               placeholder="请输入您的问题..."
               :disabled="isLoading"
@@ -161,7 +164,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, computed } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { Plus, Delete, Menu, Refresh, Promotion, CircleCheck, CircleClose } from '@element-plus/icons-vue'
 import { IconBot, IconUser, IconThumbUp, IconThumbDown } from '@/components/icons'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -202,9 +205,29 @@ const formatTime = (time: string) => {
   return date.toLocaleDateString()
 }
 
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+  return fallback
+}
+
+const escapeHtml = (content: string) => {
+  return content.replace(/[&<>"']/g, (char) => {
+    const entities: Record<string, string> = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    }
+    return entities[char]
+  })
+}
+
 const formatContent = (content: string) => {
   if (!content) return ''
-  return content
+  return escapeHtml(content)
     .replace(/\n/g, '<br>')
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/`(.*?)`/g, '<code>$1</code>')
@@ -221,9 +244,10 @@ const scrollToBottom = () => {
 const loadSessionList = async () => {
   try {
     const res = await getSessionList()
-    sessionList.value = res.data || []
+    sessionList.value = res || []
   } catch (error) {
     console.error('加载会话列表失败', error)
+    ElMessage.error(getErrorMessage(error, '加载会话列表失败'))
   }
 }
 
@@ -231,7 +255,7 @@ const switchSession = async (sid: string) => {
   sessionId.value = sid
   try {
     const res = await getConversationHistory(sid)
-    const history = res.data || []
+    const history = res || []
     const restored: ChatMessage[] = []
     for (const item of history) {
       const t = item.createTime
@@ -249,6 +273,7 @@ const switchSession = async (sid: string) => {
           role: 'assistant',
           content: item.answer.trim(),
           time: t,
+          fallback: Boolean(item.fallback),
           feedback: undefined
         })
       }
@@ -257,17 +282,19 @@ const switchSession = async (sid: string) => {
     scrollToBottom()
   } catch (error) {
     console.error('加载会话历史失败', error)
+    ElMessage.error(getErrorMessage(error, '加载会话历史失败'))
   }
 }
 
 const startNewSession = async () => {
   try {
     const res = await createNewSession()
-    sessionId.value = res.data
+    sessionId.value = res
     messages.value = []
     await loadSessionList()
   } catch (error) {
     console.error('创建会话失败', error)
+    ElMessage.error(getErrorMessage(error, '创建会话失败'))
   }
 }
 
@@ -286,6 +313,7 @@ const handleDeleteSession = async (sid: string) => {
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('删除会话失败', error)
+      ElMessage.error(getErrorMessage(error, '删除会话失败'))
     }
   }
 }
@@ -310,7 +338,7 @@ const sendMessage = async () => {
       question,
       sessionId: sessionId.value || undefined
     })
-    const data = res.data
+    const data = res
 
     if (sessionId.value !== data.sessionId) {
       sessionId.value = data.sessionId
@@ -321,12 +349,13 @@ const sendMessage = async () => {
       role: 'assistant',
       content: data.answer,
       time: new Date(data.createTime).toLocaleTimeString(),
+      fallback: Boolean(data.fallback),
       feedback: undefined
     }
     messages.value.push(assistantMessage)
     scrollToBottom()
-  } catch (error: any) {
-    ElMessage.error(error.message || '发送失败，请重试')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '发送失败，请重试'))
     messages.value.pop()
   } finally {
     isLoading.value = false
@@ -342,17 +371,17 @@ const sendQuickQuestion = (question: string) => {
   sendMessage()
 }
 
-const handleFeedback = async (index: number, feedback: number) => {
+const handleFeedback = async (index: number, feedback: 1 | -1) => {
   if (!sessionId.value) return
   try {
     await submitFeedback({
       sessionId: sessionId.value,
-      feedback: feedback as 1 | -1
+      feedback
     })
     messages.value[index].feedback = feedback
     ElMessage.success(feedback === 1 ? '感谢您的反馈' : '感谢您的反馈，我们会改进')
   } catch (error) {
-    ElMessage.error('提交反馈失败')
+    ElMessage.error(getErrorMessage(error, '提交反馈失败'))
   }
 }
 
@@ -758,6 +787,16 @@ onMounted(() => {
         .message-time {
           font-size: 11px;
           color: var(--text-secondary);
+        }
+
+        .fallback-status {
+          padding: 2px 6px;
+          border: 1px solid hsl(38, 72%, 70%);
+          border-radius: var(--radius-sm);
+          background: hsl(38, 90%, 96%);
+          color: hsl(32, 70%, 38%);
+          font-size: 11px;
+          line-height: 1.2;
         }
 
         :deep(.el-button) {

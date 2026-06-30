@@ -105,7 +105,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, shallowRef } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Search, Clock, View, Document, Warning, ScaleToOriginal } from '@element-plus/icons-vue'
 import { getNewsPage, getCategories, likeNews, unlikeNews, type News, type NewsCategory } from '@/api/news'
@@ -180,8 +180,8 @@ const loadNews = async () => {
       newsType: selectedType.value || undefined,
       keyword: keyword.value || undefined
     })
-    newsList.value = res.data.records
-    total.value = res.data.total
+    newsList.value = res.records
+    total.value = res.total
   } catch {
     // error handled by interceptor
   } finally {
@@ -192,7 +192,7 @@ const loadNews = async () => {
 const loadCategories = async () => {
   try {
     const res = await getCategories()
-    categories.value = res.data
+    categories.value = res
   } catch {
     // error handled by interceptor
   }

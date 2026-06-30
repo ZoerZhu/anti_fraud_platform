@@ -28,7 +28,7 @@
         </button>
       </div>
       <div class="forum-page__actions">
-        <select class="forum-page__sort-select" v-model="sortBy" @change="loadPosts">
+        <select class="forum-page__sort-select" v-model="sortBy" @change="reloadFromFirstPage">
           <option value="time">按时间</option>
           <option value="like">按点赞</option>
           <option value="comment">按评论</option>
@@ -39,9 +39,9 @@
             class="forum-page__search-input"
             placeholder="搜索帖子..."
             v-model="keyword"
-            @keyup.enter="loadPosts"
+            @keyup.enter="reloadFromFirstPage"
           />
-          <button class="forum-page__search-btn" @click="loadPosts">
+          <button class="forum-page__search-btn" @click="reloadFromFirstPage">
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="11" cy="11" r="8"/>
               <path d="m21 21-4.35-4.35"/>
@@ -241,6 +241,13 @@ const formatTime = (time: string) => {
   return time.slice(0, 10)
 }
 
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+  return fallback
+}
+
 const loadPosts = async () => {
   loading.value = true
   try {
@@ -249,15 +256,20 @@ const loadPosts = async () => {
       pageSize: pageSize.value,
       postType: activeTab.value,
       sortBy: sortBy.value,
-      keyword: keyword.value || undefined
+      keyword: keyword.value.trim() || undefined
     })
-    postList.value = res.data.records
-    total.value = res.data.total
-  } catch {
-    ElMessage.error('加载帖子失败')
+    postList.value = res.records
+    total.value = res.total
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '加载帖子失败'))
   } finally {
     loading.value = false
   }
+}
+
+const reloadFromFirstPage = () => {
+  pageNum.value = 1
+  loadPosts()
 }
 
 const switchTab = (value: string) => {
@@ -298,12 +310,16 @@ const submitPost = async () => {
   }
   publishing.value = true
   try {
-    await createPost(publishForm)
+    await createPost({
+      title: publishForm.title.trim(),
+      content: publishForm.content.trim(),
+      postType: publishForm.postType
+    })
     ElMessage.success('发布成功')
     closePublishDialog()
     loadPosts()
-  } catch {
-    ElMessage.error('发布失败')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '发布失败'))
   } finally {
     publishing.value = false
   }
@@ -314,14 +330,14 @@ const toggleLike = async (post: PostVO) => {
     if (post.isLiked) {
       await unlikePost(post.id)
       post.isLiked = false
-      post.likeCount--
+      post.likeCount = Math.max(0, post.likeCount - 1)
     } else {
       await likePost(post.id)
       post.isLiked = true
       post.likeCount++
     }
-  } catch {
-    ElMessage.error('操作失败')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '操作失败'))
   }
 }
 

@@ -391,7 +391,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getAdminChallengeList,
@@ -407,12 +407,13 @@ import {
   type ChallengeStatsVO
 } from '@/api/challenge'
 import ScenarioScriptEditor from '@/components/admin/ScenarioScriptEditor.vue'
-import type { ScenarioScriptModel } from '@/types/scenario-script'
+
+type ChallengeRow = ChallengeVO & { _statusLoading?: boolean }
 
 const loading = ref(false)
 const submitting = ref(false)
 const batchLoading = ref(false)
-const challengeList = ref<ChallengeVO[]>([])
+const challengeList = ref<ChallengeRow[]>([])
 const searchKeyword = ref('')
 const filterType = ref('')
 const filterStatus = ref<number | null>(null)
@@ -480,24 +481,18 @@ const fetchChallenges = async () => {
       pageNum: pagination.value.current,
       pageSize: pagination.value.pageSize,
       keyword: searchKeyword.value || undefined,
-      type: filterType.value || undefined
-    } as any)
-
-    let records = (res.data as any).records
-
-    // 前端过滤状态
-    if (filterStatus.value !== null) {
-      records = records.filter((c: ChallengeVO) => c.status === filterStatus.value)
-    }
+      type: filterType.value || undefined,
+      status: filterStatus.value ?? undefined
+    })
 
     // 添加临时状态用于开关
-    records = records.map((c: ChallengeVO & { _statusLoading?: boolean }) => ({
+    const records = res.records.map((c: ChallengeVO & { _statusLoading?: boolean }) => ({
       ...c,
       _statusLoading: false
     }))
 
     challengeList.value = records
-    pagination.value.total = (res.data as any).total
+    pagination.value.total = res.total
   } catch (error) {
     console.error('获取关卡列表失败:', error)
   } finally {
@@ -508,7 +503,7 @@ const fetchChallenges = async () => {
 const fetchOverview = async () => {
   try {
     const res = await getChallengeOverview()
-    Object.assign(overview, res.data)
+    Object.assign(overview, res)
   } catch (error) {
     console.error('获取统计概览失败:', error)
   }
@@ -557,7 +552,7 @@ const handleViewDetail = async (row: ChallengeVO) => {
   detailVisible.value = true
   try {
     const res = await getChallengeStats(row.id)
-    challengeStats.value = res.data
+    challengeStats.value = res
   } catch {
     challengeStats.value = null
   }
@@ -577,16 +572,19 @@ const handleSubmit = async () => {
       type: form.value.type,
       passingScore: form.value.passingScore,
       scoreReward: form.value.scoreReward,
-      content: form.value.type === 'quiz' ? form.value.content : null,
-      scripts: form.value.type === 'scenario' ? form.value.scripts : null,
       status: form.value.status
+    }
+    const payload = {
+      ...submitData,
+      ...(form.value.type === 'quiz' ? { content: form.value.content } : {}),
+      ...(form.value.type === 'scenario' ? { scripts: form.value.scripts } : {})
     }
 
     if (isEdit.value) {
-      await updateChallenge(form.value.id!, submitData)
+      await updateChallenge(form.value.id!, payload)
       ElMessage.success('更新成功')
     } else {
-      await createChallenge(submitData)
+      await createChallenge(payload)
       ElMessage.success('创建成功')
     }
     dialogVisible.value = false

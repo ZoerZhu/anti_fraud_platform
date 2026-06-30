@@ -56,7 +56,7 @@ public interface ChallengeService {
     /**
      * 获取所有关卡(管理员)
      */
-    IPage<ChallengeVO> getAdminChallengeList(int pageNum, int pageSize, String keyword, String type);
+    IPage<ChallengeVO> getAdminChallengeList(int pageNum, int pageSize, String keyword, String type, Integer status);
 
     /**
      * 获取闯关进度统计

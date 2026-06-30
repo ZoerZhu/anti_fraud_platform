@@ -138,6 +138,13 @@ const progressPercent = computed(() => {
   )
 })
 
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+  return fallback
+}
+
 const handleTypeChange = () => {
   // 类型切换后自动过滤
 }
@@ -161,10 +168,10 @@ const fetchData = async () => {
       getChallengeList(),
       getChallengeProgress()
     ])
-    challenges.value = listRes.data || []
-    progressData.value = progressRes.data
-  } catch {
-    ElMessage.error('加载关卡数据失败')
+    challenges.value = listRes || []
+    progressData.value = progressRes
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '加载关卡数据失败'))
   } finally {
     loading.value = false
   }

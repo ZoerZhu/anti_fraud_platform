@@ -34,6 +34,11 @@ public class ChatVO implements Serializable {
     private Integer tokensUsed;
 
     /**
+     * 是否为AI服务不可用时的本地降级回答
+     */
+    private Boolean fallback;
+
+    /**
      * 提问时间
      */
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")

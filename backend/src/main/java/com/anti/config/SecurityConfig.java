@@ -45,7 +45,6 @@ public class SecurityConfig {
                     "/api/public/**",
                     // 上传的封面等静态图片，浏览器 img 标签无法携带 JWT，需匿名可访问
                     "/uploads/**",
-                    "/api/file/**",
                     "/swagger-ui/**",
                     "/swagger-ui.html",
                     "/v3/api-docs/**",

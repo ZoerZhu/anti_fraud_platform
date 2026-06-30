@@ -40,6 +40,9 @@
         FROM forum_post fp
         LEFT JOIN sys_user u ON fp.user_id = u.id
         WHERE fp.status = 1
+        <if test="postType != null and postType != ''">
+            AND fp.post_type = #{postType}
+        </if>
         AND (fp.title LIKE CONCAT('%', #{keyword}, '%')
              OR fp.content LIKE CONCAT('%', #{keyword}, '%'))
         ORDER BY fp.is_featured DESC, fp.create_time DESC

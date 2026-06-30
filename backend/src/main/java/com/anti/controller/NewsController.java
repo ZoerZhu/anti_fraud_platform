@@ -1,5 +1,6 @@
 package com.anti.controller;
 
+import com.anti.common.BusinessException;
 import com.anti.common.Result;
 import com.anti.entity.News;
 import com.anti.entity.dto.CreateNewsRequest;
@@ -10,11 +11,14 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @Slf4j
 @RestController
@@ -38,6 +42,28 @@ public class NewsController {
         return Result.success(newsService.getNewsPage(pageNum, pageSize, categoryId, newsType, keyword, userId));
     }
 
+    @GetMapping("/required")
+    @Operation(summary = "获取必读资讯")
+    public Result<List<News>> getRequiredNews(
+            @Parameter(description = "返回数量") @RequestParam(defaultValue = "3") Integer limit,
+            @AuthenticationPrincipal LoginUser loginUser) {
+        Long userId = loginUser != null ? loginUser.getUserId() : null;
+        return Result.success(newsService.getRequiredNews(limit, userId));
+    }
+
+    @GetMapping("/admin/page")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "分页查询资讯列表(管理员)")
+    public Result<IPage<News>> getAdminNewsPage(
+            @Parameter(description = "页码") @RequestParam(defaultValue = "1") Integer pageNum,
+            @Parameter(description = "每页数量") @RequestParam(defaultValue = "10") Integer pageSize,
+            @Parameter(description = "分类ID") @RequestParam(required = false) Long categoryId,
+            @Parameter(description = "资讯类型") @RequestParam(required = false) String newsType,
+            @Parameter(description = "搜索关键词") @RequestParam(required = false) String keyword,
+            @Parameter(description = "状态:0草稿1已发布") @RequestParam(required = false) Integer status) {
+        return Result.success(newsService.getAdminNewsPage(pageNum, pageSize, categoryId, newsType, keyword, status));
+    }
+
     @GetMapping("/{id}")
     @Operation(summary = "获取资讯详情")
     public Result<News> getNewsDetail(
@@ -50,7 +76,7 @@ public class NewsController {
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "创建资讯(管理员)")
-    public Result<News> createNews(@RequestBody CreateNewsRequest request, @AuthenticationPrincipal LoginUser loginUser) {
+    public Result<News> createNews(@Valid @RequestBody CreateNewsRequest request, @AuthenticationPrincipal LoginUser loginUser) {
         News news = new News();
         news.setTitle(request.getTitle());
         news.setContent(request.getContent());
@@ -60,13 +86,13 @@ public class NewsController {
         news.setNewsType(request.getNewsType());
         news.setIsTop(request.getIsTop());
         news.setIsMandatory(request.getIsMandatory());
-        return Result.success(newsService.createNews(news, loginUser.getUserId()));
+        return Result.success(newsService.createNews(news, requireLogin(loginUser)));
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "更新资讯(管理员)")
-    public Result<News> updateNews(@PathVariable Long id, @RequestBody UpdateNewsRequest request) {
+    public Result<News> updateNews(@PathVariable Long id, @Valid @RequestBody UpdateNewsRequest request) {
         News news = new News();
         news.setId(id);
         news.setTitle(request.getTitle());
@@ -118,14 +144,10 @@ public class NewsController {
             @PathVariable Long id,
             @RequestBody(required = false) java.util.Map<String, Integer> body,
             @AuthenticationPrincipal LoginUser loginUser) {
-        log.info("=== 资讯浏览接口调用: newsId={}, body={}, loginUser={} ===", id, body, loginUser != null ? loginUser.getUserId() : "null");
         newsService.incrementViewCount(id);
         if (loginUser != null) {
             Integer stayDuration = body != null ? body.get("stayDuration") : null;
-            log.info("=== 准备记录浏览: userId={}, stayDuration={} ===", loginUser.getUserId(), stayDuration);
             newsService.addBrowseRecord(id, loginUser.getUserId(), stayDuration);
-        } else {
-            log.warn("=== 用户未登录，跳过浏览记录 ===");
         }
         return Result.success();
     }
@@ -133,13 +155,13 @@ public class NewsController {
     @PostMapping("/{id}/like")
     @Operation(summary = "点赞资讯")
     public Result<Boolean> likeNews(@PathVariable Long id, @AuthenticationPrincipal LoginUser loginUser) {
-        return Result.success(newsService.likeNews(id, loginUser.getUserId()));
+        return Result.success(newsService.likeNews(id, requireLogin(loginUser)));
     }
 
     @DeleteMapping("/{id}/like")
     @Operation(summary = "取消点赞")
     public Result<Boolean> unlikeNews(@PathVariable Long id, @AuthenticationPrincipal LoginUser loginUser) {
-        return Result.success(newsService.unlikeNews(id, loginUser.getUserId()));
+        return Result.success(newsService.unlikeNews(id, requireLogin(loginUser)));
     }
 
     @PostMapping("/{id}/browse")
@@ -148,7 +170,7 @@ public class NewsController {
             @PathVariable Long id,
             @RequestParam(required = false) Integer stayDuration,
             @AuthenticationPrincipal LoginUser loginUser) {
-        newsService.addBrowseRecord(id, loginUser.getUserId(), stayDuration);
+        newsService.addBrowseRecord(id, requireLogin(loginUser), stayDuration);
         return Result.success();
     }
 
@@ -158,6 +180,13 @@ public class NewsController {
             @AuthenticationPrincipal LoginUser loginUser,
             @RequestParam(defaultValue = "1") Integer pageNum,
             @RequestParam(defaultValue = "10") Integer pageSize) {
-        return Result.success(newsService.getUserBrowseHistory(loginUser.getUserId(), pageNum, pageSize));
+        return Result.success(newsService.getUserBrowseHistory(requireLogin(loginUser), pageNum, pageSize));
+    }
+
+    private Long requireLogin(LoginUser loginUser) {
+        if (loginUser == null || loginUser.getUserId() == null) {
+            throw new BusinessException(401, "请先登录");
+        }
+        return loginUser.getUserId();
     }
 }

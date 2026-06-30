@@ -30,8 +30,9 @@
               </template>
               <el-input
                 v-model="form.username"
-                placeholder="3-20位字母数字组合"
+                placeholder="3-50位字母数字组合"
                 size="large"
+                maxlength="50"
                 :prefix-icon="User"
               />
             </el-form-item>
@@ -44,6 +45,7 @@
                 v-model="form.studentNo"
                 placeholder="请输入学号"
                 size="large"
+                maxlength="30"
                 :prefix-icon="Postcard"
               />
             </el-form-item>
@@ -83,12 +85,13 @@
             <template #label>
               <span class="register-card__label">昵称</span>
             </template>
-            <el-input
-              v-model="form.nickname"
-              placeholder="选填，用于展示"
-              size="large"
-              :prefix-icon="UserFilled"
-            />
+              <el-input
+                v-model="form.nickname"
+                placeholder="选填，用于展示"
+                size="large"
+                maxlength="50"
+                :prefix-icon="UserFilled"
+              />
           </el-form-item>
 
           <div class="register-card__row">
@@ -145,6 +148,7 @@
                 v-model="form.major"
                 placeholder="请输入专业"
                 size="large"
+                maxlength="100"
                 :prefix-icon="Reading"
               />
             </el-form-item>
@@ -230,7 +234,7 @@ const validateEmail = (_rule: any, value: string, callback: any) => {
 const rules: FormRules = {
   username: [
     { required: true, message: '请输入用户名', trigger: 'blur' },
-    { min: 3, max: 20, message: '用户名长度为3-20个字符', trigger: 'blur' },
+    { min: 3, max: 50, message: '用户名长度为3-50个字符', trigger: 'blur' },
     { pattern: /^[a-zA-Z0-9_]+$/, message: '用户名只能包含字母、数字和下划线', trigger: 'blur' }
   ],
   password: [
@@ -256,22 +260,29 @@ const rules: FormRules = {
 }
 
 const handleRegister = async () => {
-  if (!formRef.value) return
+  if (!formRef.value || loading.value) return
 
   await formRef.value.validate(async (valid) => {
     if (!valid) return
 
     loading.value = true
     try {
+      const username = form.username.trim()
+      const nickname = form.nickname.trim()
+      const studentNo = form.studentNo.trim()
+      const phone = form.phone.trim()
+      const email = form.email.trim()
+      const major = form.major.trim()
+
       await userStore.register({
-        username: form.username,
+        username,
         password: form.password,
-        nickname: form.nickname || form.username,
-        studentNo: form.studentNo,
-        phone: form.phone || undefined,
-        email: form.email || undefined,
+        nickname: nickname || username,
+        studentNo,
+        phone: phone || undefined,
+        email: email || undefined,
         grade: form.grade,
-        major: form.major || undefined
+        major: major || undefined
       })
 
       ElMessage.success('注册成功，请登录')

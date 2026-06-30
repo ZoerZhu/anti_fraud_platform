@@ -1,5 +1,4 @@
-import request from '@/utils/request'
-import type { AxiosPromise } from 'axios'
+import { del, get, post, put } from '@/utils/request'
 
 export interface PostVO {
   id: number
@@ -74,84 +73,57 @@ export function getPostPage(params: {
   postType?: string
   sortBy?: string
   keyword?: string
-}): AxiosPromise<PageResult<PostVO>> {
-  return request({
-    url: '/forum/post/page',
-    method: 'get',
-    params
-  })
+}): Promise<PageResult<PostVO>> {
+  return get<PageResult<PostVO>>('/forum/post/page', { params })
 }
 
 /**
  * 获取帖子详情
  */
-export function getPostDetail(id: number): AxiosPromise<PostVO> {
-  return request({
-    url: `/forum/post/${id}`,
-    method: 'get'
-  })
+export function getPostDetail(id: number): Promise<PostVO> {
+  return get<PostVO>(`/forum/post/${id}`)
 }
 
 /**
  * 创建帖子
  */
-export function createPost(data: CreatePostRequest): AxiosPromise<PostVO> {
-  return request({
-    url: '/forum/post',
-    method: 'post',
-    data
-  })
+export function createPost(data: CreatePostRequest): Promise<PostVO> {
+  return post<PostVO>('/forum/post', data)
 }
 
 /**
  * 更新帖子
  */
-export function updatePost(id: number, data: UpdatePostRequest): AxiosPromise<PostVO> {
-  return request({
-    url: `/forum/post/${id}`,
-    method: 'put',
-    data
-  })
+export function updatePost(id: number, data: UpdatePostRequest): Promise<PostVO> {
+  return put<PostVO>(`/forum/post/${id}`, data)
 }
 
 /**
  * 删除帖子
  */
-export function deletePost(id: number): AxiosPromise<void> {
-  return request({
-    url: `/forum/post/${id}`,
-    method: 'delete'
-  })
+export function deletePost(id: number): Promise<void> {
+  return del<void>(`/forum/post/${id}`)
 }
 
 /**
  * 点赞帖子
  */
-export function likePost(id: number): AxiosPromise<void> {
-  return request({
-    url: `/forum/post/${id}/like`,
-    method: 'post'
-  })
+export function likePost(id: number): Promise<void> {
+  return post<void>(`/forum/post/${id}/like`)
 }
 
 /**
  * 取消点赞
  */
-export function unlikePost(id: number): AxiosPromise<void> {
-  return request({
-    url: `/forum/post/${id}/like`,
-    method: 'delete'
-  })
+export function unlikePost(id: number): Promise<void> {
+  return del<void>(`/forum/post/${id}/like`)
 }
 
 /**
  * 获取帖子的评论列表
  */
-export function getPostComments(postId: number): AxiosPromise<CommentVO[]> {
-  return request({
-    url: `/forum/post/${postId}/comments`,
-    method: 'get'
-  })
+export function getPostComments(postId: number): Promise<CommentVO[]> {
+  return get<CommentVO[]>(`/forum/post/${postId}/comments`)
 }
 
 /**
@@ -161,10 +133,8 @@ export function getUserPosts(params: {
   userId: number
   pageNum: number
   pageSize: number
-}): AxiosPromise<PageResult<PostVO>> {
-  return request({
-    url: `/forum/user/${params.userId}/posts`,
-    method: 'get',
+}): Promise<PageResult<PostVO>> {
+  return get<PageResult<PostVO>>(`/forum/user/${params.userId}/posts`, {
     params: { pageNum: params.pageNum, pageSize: params.pageSize }
   })
 }
@@ -172,40 +142,27 @@ export function getUserPosts(params: {
 /**
  * 创建评论
  */
-export function createComment(data: CreateCommentRequest): AxiosPromise<CommentVO> {
-  return request({
-    url: '/comment',
-    method: 'post',
-    data
-  })
+export function createComment(data: CreateCommentRequest): Promise<CommentVO> {
+  return post<CommentVO>('/comment', data)
 }
 
 /**
  * 删除评论
  */
-export function deleteComment(id: number): AxiosPromise<void> {
-  return request({
-    url: `/comment/${id}`,
-    method: 'delete'
-  })
+export function deleteComment(id: number): Promise<void> {
+  return del<void>(`/comment/${id}`)
 }
 
 /**
  * 点赞评论
  */
-export function likeComment(id: number): AxiosPromise<void> {
-  return request({
-    url: `/comment/${id}/like`,
-    method: 'post'
-  })
+export function likeComment(id: number): Promise<void> {
+  return post<void>(`/comment/${id}/like`)
 }
 
 /**
  * 取消点赞评论
  */
-export function unlikeComment(id: number): AxiosPromise<void> {
-  return request({
-    url: `/comment/${id}/like`,
-    method: 'delete'
-  })
+export function unlikeComment(id: number): Promise<void> {
+  return del<void>(`/comment/${id}/like`)
 }

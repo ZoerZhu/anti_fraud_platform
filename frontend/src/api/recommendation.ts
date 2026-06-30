@@ -1,4 +1,4 @@
-import request from '@/utils/request'
+import { get, post } from '@/utils/request'
 
 export interface RecommendationVO {
   itemId: number
@@ -20,16 +20,16 @@ export interface UserInterestVO {
   interestTags: { tagId: number; tagName: string; score: number }[]
 }
 
-export function getRecommendationList(params: { limit?: number; itemType?: string }) {
-  return request.get<RecommendationVO[]>('/recommendation/list', { params })
+export function getRecommendationList(params: { limit?: number; itemType?: string }): Promise<RecommendationVO[]> {
+  return get<RecommendationVO[]>('/recommendation/list', { params })
 }
 
-export function getUserInterest() {
-  return request.get<UserInterestVO>('/recommendation/interest')
+export function getUserInterest(): Promise<UserInterestVO> {
+  return get<UserInterestVO>('/recommendation/interest')
 }
 
-export function recordRecommendationClick(itemId: number, itemType: string) {
-  return request.post<void>('/recommendation/click', null, {
+export function recordRecommendationClick(itemId: number, itemType: string): Promise<void> {
+  return post<void>('/recommendation/click', null, {
     params: { itemId, itemType }
   })
 }

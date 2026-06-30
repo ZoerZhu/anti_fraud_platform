@@ -3,14 +3,15 @@ package com.anti.controller;
 import com.anti.common.Result;
 import com.anti.entity.News;
 import com.anti.entity.vo.LeaderboardVO;
+import com.anti.security.LoginUser;
 import com.anti.service.CacheRefreshService;
 import com.anti.service.CacheService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -75,8 +76,8 @@ public class CacheController {
     @GetMapping("/leaderboard/daily")
     public Result<List<LeaderboardVO>> getDailyLeaderboard(
             @RequestParam(defaultValue = "20") int limit,
-            HttpServletRequest request) {
-        Long userId = extractUserId(request);
+            @AuthenticationPrincipal LoginUser loginUser) {
+        Long userId = loginUser != null ? loginUser.getUserId() : null;
         List<LeaderboardVO> leaderboard = cacheService.getDailyLeaderboard(userId, limit);
         return Result.success(leaderboard);
     }
@@ -85,8 +86,8 @@ public class CacheController {
     @GetMapping("/leaderboard/weekly")
     public Result<List<LeaderboardVO>> getWeeklyLeaderboard(
             @RequestParam(defaultValue = "20") int limit,
-            HttpServletRequest request) {
-        Long userId = extractUserId(request);
+            @AuthenticationPrincipal LoginUser loginUser) {
+        Long userId = loginUser != null ? loginUser.getUserId() : null;
         List<LeaderboardVO> leaderboard = cacheService.getWeeklyLeaderboard(userId, limit);
         return Result.success(leaderboard);
     }
@@ -95,8 +96,8 @@ public class CacheController {
     @GetMapping("/leaderboard/all")
     public Result<List<LeaderboardVO>> getAllTimeLeaderboard(
             @RequestParam(defaultValue = "20") int limit,
-            HttpServletRequest request) {
-        Long userId = extractUserId(request);
+            @AuthenticationPrincipal LoginUser loginUser) {
+        Long userId = loginUser != null ? loginUser.getUserId() : null;
         List<LeaderboardVO> leaderboard = cacheService.getAllTimeLeaderboard(userId, limit);
         return Result.success(leaderboard);
     }
@@ -199,17 +200,4 @@ public class CacheController {
         return Result.success(status);
     }
 
-    private Long extractUserId(HttpServletRequest request) {
-        String token = request.getHeader("Authorization");
-        if (token != null && token.startsWith("Bearer ")) {
-            token = token.substring(7);
-            try {
-                com.anti.security.JwtUtils jwtUtils = new com.anti.security.JwtUtils();
-                return jwtUtils.getUserIdFromToken(token);
-            } catch (Exception e) {
-                return null;
-            }
-        }
-        return null;
-    }
 }

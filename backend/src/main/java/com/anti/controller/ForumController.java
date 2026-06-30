@@ -1,5 +1,6 @@
 package com.anti.controller;
 
+import com.anti.common.BusinessException;
 import com.anti.common.Result;
 import com.anti.entity.dto.CreatePostRequest;
 import com.anti.entity.dto.UpdatePostRequest;
@@ -7,6 +8,8 @@ import com.anti.entity.vo.CommentVO;
 import com.anti.entity.vo.PostVO;
 import com.anti.service.ForumPostService;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import jakarta.validation.Valid;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
@@ -57,9 +60,9 @@ public class ForumController {
      * 创建帖子
      */
     @PostMapping("/post")
-    public Result<PostVO> createPost(@RequestBody CreatePostRequest request,
+    public Result<PostVO> createPost(@Valid @RequestBody CreatePostRequest request,
                                     @AuthenticationPrincipal UserDetails userDetails) {
-        Long userId = getUserId(userDetails);
+        Long userId = requireUserId(userDetails);
         PostVO post = forumPostService.createPost(request, userId);
         return Result.success(post);
     }
@@ -69,9 +72,9 @@ public class ForumController {
      */
     @PutMapping("/post/{postId}")
     public Result<PostVO> updatePost(@PathVariable Long postId,
-                                    @RequestBody UpdatePostRequest request,
+                                    @Valid @RequestBody UpdatePostRequest request,
                                     @AuthenticationPrincipal UserDetails userDetails) {
-        Long userId = getUserId(userDetails);
+        Long userId = requireUserId(userDetails);
         PostVO post = forumPostService.updatePost(postId, request, userId);
         return Result.success(post);
     }
@@ -82,7 +85,7 @@ public class ForumController {
     @DeleteMapping("/post/{postId}")
     public Result<Void> deletePost(@PathVariable Long postId,
                                    @AuthenticationPrincipal UserDetails userDetails) {
-        Long userId = getUserId(userDetails);
+        Long userId = requireUserId(userDetails);
         forumPostService.deletePost(postId, userId);
         return Result.success();
     }
@@ -93,7 +96,7 @@ public class ForumController {
     @PostMapping("/post/{postId}/like")
     public Result<Void> likePost(@PathVariable Long postId,
                                  @AuthenticationPrincipal UserDetails userDetails) {
-        Long userId = getUserId(userDetails);
+        Long userId = requireUserId(userDetails);
         forumPostService.likePost(postId, userId);
         return Result.success();
     }
@@ -104,7 +107,7 @@ public class ForumController {
     @DeleteMapping("/post/{postId}/like")
     public Result<Void> unlikePost(@PathVariable Long postId,
                                    @AuthenticationPrincipal UserDetails userDetails) {
-        Long userId = getUserId(userDetails);
+        Long userId = requireUserId(userDetails);
         forumPostService.unlikePost(postId, userId);
         return Result.success();
     }
@@ -113,6 +116,7 @@ public class ForumController {
      * 置顶帖子(管理员)
      */
     @PostMapping("/post/{postId}/top")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> setTop(@PathVariable Long postId,
                                @RequestParam(defaultValue = "1") int isTop) {
         forumPostService.setTop(postId, isTop);
@@ -123,6 +127,7 @@ public class ForumController {
      * 精选帖子(管理员)
      */
     @PostMapping("/post/{postId}/featured")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> setFeatured(@PathVariable Long postId,
                                     @RequestParam(defaultValue = "1") int isFeatured) {
         forumPostService.setFeatured(postId, isFeatured);
@@ -159,5 +164,13 @@ public class ForumController {
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    private Long requireUserId(UserDetails userDetails) {
+        Long userId = getUserId(userDetails);
+        if (userId == null) {
+            throw new BusinessException(401, "请先登录");
+        }
+        return userId;
     }
 }

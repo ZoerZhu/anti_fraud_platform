@@ -1,5 +1,6 @@
 package com.anti.controller;
 
+import com.anti.common.BusinessException;
 import com.anti.common.Result;
 import com.anti.entity.dto.ChatRequest;
 import com.anti.entity.dto.FeedbackRequest;
@@ -7,6 +8,7 @@ import com.anti.entity.vo.ChatVO;
 import com.anti.entity.vo.SessionVO;
 import com.anti.entity.vo.TokenStatsVO;
 import com.anti.service.QAConversationService;
+import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
@@ -30,7 +32,7 @@ public class ChatController {
      * 发送问题并获取AI回答
      */
     @PostMapping("/ask")
-    public Result<ChatVO> ask(@RequestBody ChatRequest request,
+    public Result<ChatVO> ask(@Valid @RequestBody ChatRequest request,
                               @AuthenticationPrincipal UserDetails userDetails) {
         Long userId = getUserId(userDetails);
         ChatVO result = qaConversationService.askQuestion(request.getQuestion(), request.getSessionId(), userId);
@@ -62,7 +64,7 @@ public class ChatController {
      * 提交反馈
      */
     @PostMapping("/feedback")
-    public Result<Void> submitFeedback(@RequestBody FeedbackRequest request,
+    public Result<Void> submitFeedback(@Valid @RequestBody FeedbackRequest request,
                                        @AuthenticationPrincipal UserDetails userDetails) {
         Long userId = getUserId(userDetails);
         qaConversationService.submitFeedback(request.getSessionId(), request.getFeedback(), userId);
@@ -102,12 +104,12 @@ public class ChatController {
 
     private Long getUserId(UserDetails userDetails) {
         if (userDetails == null) {
-            throw new RuntimeException("请先登录");
+            throw new BusinessException(401, "请先登录");
         }
         try {
             return Long.parseLong(userDetails.getUsername());
         } catch (NumberFormatException e) {
-            throw new RuntimeException("用户ID无效");
+            throw new BusinessException(401, "用户ID无效");
         }
     }
 }

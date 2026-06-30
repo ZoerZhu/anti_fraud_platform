@@ -159,6 +159,24 @@
               <el-button @click="handleRetry" plain>重新挑战</el-button>
               <el-button type="primary" @click="handleBack">返回关卡</el-button>
             </div>
+
+            <section class="scenario-review" v-if="decisionHistory.length">
+              <h2 class="scenario-review__title">决策复盘</h2>
+              <div class="scenario-review__list">
+                <div
+                  v-for="(record, idx) in decisionHistory"
+                  :key="`${record.nodeId}-${record.edgeId}-${idx}`"
+                  class="scenario-review__item"
+                  :class="{ 'scenario-review__item--safe': record.isSafeChoice, 'scenario-review__item--risk': !record.isSafeChoice }"
+                >
+                  <span class="scenario-review__step">第 {{ idx + 1 }} 步</span>
+                  <span class="scenario-review__choice">{{ record.choiceLabel }}</span>
+                  <el-tag size="small" :type="record.isSafeChoice ? 'success' : 'danger'">
+                    {{ record.isSafeChoice ? '安全选择' : '风险选择' }}
+                  </el-tag>
+                </div>
+              </div>
+            </section>
           </div>
         </template>
       </template>
@@ -244,9 +262,16 @@ const ratingDesc = computed(() => {
   return descMap[rating.value] || ''
 })
 
-const formatTime = (nodeId: string) => {
+const formatTime = (_nodeId: string) => {
   const now = new Date()
   return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`
+}
+
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+  return fallback
 }
 
 const handleBack = () => {
@@ -263,11 +288,14 @@ const handleChoice = async (choice: ScenarioEdgeVO) => {
       currentNode: progress.value.currentNode,
       selectedEdgeId: choice.edgeId
     })
-    progress.value = res.data
+    progress.value = res
 
     if (progress.value.status !== 'in_progress') {
       if (progress.value.passed) {
-        ElMessage.success(`恭喜通关！获得 ${progress.value.earnedScore || 0} 积分奖励！`)
+        const rewardText = progress.value.earnedScore
+          ? `获得 ${progress.value.earnedScore} 积分奖励！`
+          : '本次通关已记录。'
+        ElMessage.success(`恭喜通关！${rewardText}`)
         try {
           await scoreStore.fetchScoreInfo()
         } catch {
@@ -277,8 +305,8 @@ const handleChoice = async (choice: ScenarioEdgeVO) => {
         ElMessage.warning('未能通关，再接再厉！')
       }
     }
-  } catch {
-    ElMessage.error('操作失败，请重试')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '操作失败，请重试'))
   } finally {
     submitting.value = false
   }
@@ -288,9 +316,9 @@ const handleRetry = async () => {
   try {
     await resetScenario(challengeId.value)
     const res = await startScenario(challengeId.value)
-    progress.value = res.data
-  } catch {
-    ElMessage.error('重置失败，请刷新重试')
+    progress.value = res
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '重置失败，请刷新重试'))
   }
 }
 
@@ -299,9 +327,9 @@ const fetchProgress = async () => {
   try {
     challengeId.value = Number(route.params.id)
     const res = await startScenario(challengeId.value)
-    progress.value = res.data
-  } catch (err) {
-    ElMessage.error('加载情景模拟失败')
+    progress.value = res
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '加载情景模拟失败'))
     router.push('/challenge')
   } finally {
     loading.value = false
@@ -821,6 +849,56 @@ onMounted(() => {
   gap: 16px;
 }
 
+.scenario-review {
+  margin-top: 32px;
+  text-align: left;
+
+  &__title {
+    margin: 0 0 16px;
+    color: var(--text-primary);
+    font-size: 1.15rem;
+    font-weight: 700;
+  }
+
+  &__list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  &__item {
+    display: grid;
+    grid-template-columns: 82px 1fr auto;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    background: var(--bg-card);
+    border: 1px solid hsl(220, 15%, 90%);
+    border-left: 4px solid var(--warning);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+
+    &--safe {
+      border-left-color: var(--success);
+    }
+
+    &--risk {
+      border-left-color: var(--danger);
+    }
+  }
+
+  &__step {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+  }
+
+  &__choice {
+    color: var(--text-primary);
+    font-weight: 600;
+    line-height: 1.5;
+  }
+}
+
 @media (max-width: 768px) {
   .scenario-header {
     padding: 24px 16px;
@@ -845,6 +923,11 @@ onMounted(() => {
 
   .result__stats {
     flex-wrap: wrap;
+  }
+
+  .scenario-review__item {
+    grid-template-columns: 1fr;
+    align-items: start;
   }
 }
 </style>

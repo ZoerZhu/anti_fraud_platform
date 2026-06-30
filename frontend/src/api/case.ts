@@ -1,5 +1,4 @@
-import request from '@/utils/request'
-import type { AxiosPromise } from 'axios'
+import { del, get, post, put } from '@/utils/request'
 
 export interface CaseVO {
   id: number
@@ -78,106 +77,84 @@ export function getCasePage(params: {
   pageSize: number
   tagId?: number
   keyword?: string
-}): AxiosPromise<PageResult<CaseVO>> {
-  return request({
-    url: '/case/page',
-    method: 'get',
-    params
-  })
+}): Promise<PageResult<CaseVO>> {
+  return get<PageResult<CaseVO>>('/case/page', { params })
+}
+
+/**
+ * 管理端获取案例分页列表
+ */
+export function getAdminCasePage(params: {
+  pageNum: number
+  pageSize: number
+  tagId?: number
+  keyword?: string
+  status?: number
+}): Promise<PageResult<CaseVO>> {
+  return get<PageResult<CaseVO>>('/case/admin/page', { params })
 }
 
 /**
  * 获取案例详情
  */
-export function getCaseDetail(id: number): AxiosPromise<CaseVO> {
-  return request({
-    url: `/case/${id}`,
-    method: 'get'
-  })
+export function getCaseDetail(id: number): Promise<CaseVO> {
+  return get<CaseVO>(`/case/${id}`)
 }
 
 /**
  * 创建案例(管理员)
  */
-export function createCase(data: CreateCaseRequest): AxiosPromise<CaseVO> {
-  return request({
-    url: '/case',
-    method: 'post',
-    data
-  })
+export function createCase(data: CreateCaseRequest): Promise<CaseVO> {
+  return post<CaseVO>('/case', data)
 }
 
 /**
  * 更新案例(管理员)
  */
-export function updateCase(id: number, data: UpdateCaseRequest): AxiosPromise<CaseVO> {
-  return request({
-    url: `/case/${id}`,
-    method: 'put',
-    data
-  })
+export function updateCase(id: number, data: UpdateCaseRequest): Promise<CaseVO> {
+  return put<CaseVO>(`/case/${id}`, data)
 }
 
 /**
  * 删除案例(管理员)
  */
-export function deleteCase(id: number): AxiosPromise<void> {
-  return request({
-    url: `/case/${id}`,
-    method: 'delete'
-  })
+export function deleteCase(id: number): Promise<void> {
+  return del<void>(`/case/${id}`)
 }
 
 /**
  * 发布案例(管理员)
  */
-export function publishCase(id: number): AxiosPromise<void> {
-  return request({
-    url: `/case/${id}/publish`,
-    method: 'post'
-  })
+export function publishCase(id: number): Promise<void> {
+  return post<void>(`/case/${id}/publish`)
 }
 
 /**
  * 设置精选(管理员)
  */
-export function setCaseFeatured(id: number, isFeatured: number): AxiosPromise<void> {
-  return request({
-    url: `/case/${id}/featured`,
-    method: 'put',
-    params: { isFeatured }
-  })
+export function setCaseFeatured(id: number, isFeatured: number): Promise<void> {
+  return put<void>(`/case/${id}/featured`, null, { params: { isFeatured } })
 }
 
 /**
  * 点赞案例
  */
-export function likeCase(id: number): AxiosPromise<void> {
-  return request({
-    url: `/case/${id}/like`,
-    method: 'post'
-  })
+export function likeCase(id: number): Promise<void> {
+  return post<void>(`/case/${id}/like`)
 }
 
 /**
  * 取消点赞
  */
-export function unlikeCase(id: number): AxiosPromise<void> {
-  return request({
-    url: `/case/${id}/like`,
-    method: 'delete'
-  })
+export function unlikeCase(id: number): Promise<void> {
+  return del<void>(`/case/${id}/like`)
 }
 
 /**
  * 记录浏览
  */
-export function browseCase(id: number, stayDuration: number = 0): AxiosPromise<void> {
-  return request({
-    url: `/case/${id}/browse`,
-    method: 'post',
-    params: { stayDuration }
-  })
+export function browseCase(id: number, stayDuration: number = 0): Promise<void> {
+  return post<void>(`/case/${id}/browse`, null, { params: { stayDuration } })
 }
 
 /**
@@ -186,54 +163,36 @@ export function browseCase(id: number, stayDuration: number = 0): AxiosPromise<v
 export function getBrowseHistory(params: {
   pageNum: number
   pageSize: number
-}): AxiosPromise<PageResult<CaseBrowseVO>> {
-  return request({
-    url: '/case/browse/history',
-    method: 'get',
-    params
-  })
+}): Promise<PageResult<CaseBrowseVO>> {
+  return get<PageResult<CaseBrowseVO>>('/case/browse/history', { params })
 }
 
 /**
  * 获取热度排行榜
  */
-export function getHotCases(limit: number = 10): AxiosPromise<CaseVO[]> {
-  return request({
-    url: '/case/hot',
-    method: 'get',
-    params: { limit }
-  })
+export function getHotCases(limit: number = 10): Promise<CaseVO[]> {
+  return get<CaseVO[]>('/case/hot', { params: { limit } })
 }
 
 /**
  * 获取威尔逊置信度得分
  */
-export function getWilsonScore(positive: number, total: number): AxiosPromise<number> {
-  return request({
-    url: '/case/wilson',
-    method: 'get',
-    params: { positive, total }
-  })
+export function getWilsonScore(positive: number, total: number): Promise<number> {
+  return get<number>('/case/wilson', { params: { positive, total } })
 }
 
 /**
  * 获取所有标签
  */
-export function getAllTags(): AxiosPromise<TagVO[]> {
-  return request({
-    url: '/case/tag/list',
-    method: 'get'
-  })
+export function getAllTags(): Promise<TagVO[]> {
+  return get<TagVO[]>('/case/tag/list')
 }
 
 /**
  * 根据分类获取标签
  */
-export function getTagsByCategory(category: string): AxiosPromise<TagVO[]> {
-  return request({
-    url: `/case/tag/category/${category}`,
-    method: 'get'
-  })
+export function getTagsByCategory(category: string): Promise<TagVO[]> {
+  return get<TagVO[]>(`/case/tag/category/${category}`)
 }
 
 /**
@@ -244,12 +203,8 @@ export function createTag(data: {
   category: string
   description?: string
   color?: string
-}): AxiosPromise<TagVO> {
-  return request({
-    url: '/case/tag',
-    method: 'post',
-    data
-  })
+}): Promise<TagVO> {
+  return post<TagVO>('/case/tag', data)
 }
 
 /**
@@ -260,20 +215,13 @@ export function updateTag(id: number, data: {
   category?: string
   description?: string
   color?: string
-}): AxiosPromise<TagVO> {
-  return request({
-    url: `/case/tag/${id}`,
-    method: 'put',
-    data
-  })
+}): Promise<TagVO> {
+  return put<TagVO>(`/case/tag/${id}`, data)
 }
 
 /**
  * 删除标签(管理员)
  */
-export function deleteTag(id: number): AxiosPromise<void> {
-  return request({
-    url: `/case/tag/${id}`,
-    method: 'delete'
-  })
+export function deleteTag(id: number): Promise<void> {
+  return del<void>(`/case/tag/${id}`)
 }

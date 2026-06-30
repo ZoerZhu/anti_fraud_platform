@@ -1,5 +1,6 @@
 package com.anti.service.impl;
 
+import com.anti.common.BusinessException;
 import com.anti.entity.AssociationRule;
 import com.anti.entity.dto.CreateAssociationRuleRequest;
 import com.anti.entity.vo.AssociationRuleVO;
@@ -37,7 +38,7 @@ public class AssociationRuleServiceImpl extends ServiceImpl<AssociationRuleMappe
     public AssociationRuleVO updateRule(Long id, CreateAssociationRuleRequest request) {
         AssociationRule rule = this.getById(id);
         if (rule == null) {
-            throw new RuntimeException("规则不存在");
+            throw new BusinessException(404, "规则不存在");
         }
         rule.setTriggerTag(request.getTriggerTag());
         rule.setPredictedTags(request.getPredictedTags());

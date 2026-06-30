@@ -73,6 +73,55 @@
       <main class="profile-main">
         <div v-show="activeTab === 'info'" class="profile-content">
           <h2 class="profile-content__title">个人信息</h2>
+          <section v-if="profileInfo" class="profile-insights">
+            <div class="profile-insights__metric">
+              <span class="profile-insights__label">知识水平</span>
+              <strong class="profile-insights__value">
+                {{ profileStore.getKnowledgeLevelLabel(profileInfo.knowledgeLevel || 0) }}
+              </strong>
+              <el-progress
+                :percentage="profileInfo.knowledgeLevel || 0"
+                :stroke-width="8"
+                :show-text="false"
+              />
+            </div>
+            <div class="profile-insights__metric">
+              <span class="profile-insights__label">学习阶段</span>
+              <strong class="profile-insights__value">
+                {{ profileStore.getLifecycleLabel(profileInfo.lifecycleStage || 'newbie') }}
+              </strong>
+              <span class="profile-insights__sub">{{ profileInfo.registerDays || 0 }} 天 · {{ profileInfo.browseCount || 0 }} 次浏览</span>
+            </div>
+            <div class="profile-insights__tags">
+              <span class="profile-insights__label">弱点标签</span>
+              <div class="profile-insights__tag-list">
+                <el-tag
+                  v-for="tag in profileInfo.weakPoints.slice(0, 5)"
+                  :key="tag"
+                  size="small"
+                  type="warning"
+                  effect="plain"
+                >
+                  {{ tag }}
+                </el-tag>
+                <span v-if="profileInfo.weakPoints.length === 0" class="profile-insights__empty">暂无</span>
+              </div>
+            </div>
+            <div class="profile-insights__tags">
+              <span class="profile-insights__label">兴趣标签</span>
+              <div class="profile-insights__tag-list">
+                <el-tag
+                  v-for="tag in profileInfo.interestTags.slice(0, 5)"
+                  :key="tag"
+                  size="small"
+                  effect="plain"
+                >
+                  {{ tag }}
+                </el-tag>
+                <span v-if="profileInfo.interestTags.length === 0" class="profile-insights__empty">暂无</span>
+              </div>
+            </div>
+          </section>
           <ProfileEditForm />
         </div>
 
@@ -95,6 +144,9 @@ import { ref, onMounted, markRaw, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import { useScoreStore } from '@/stores/score'
+import { useProfileStore } from '@/stores/profile'
+import { getChallengeProgress } from '@/api/challenge'
 import ProfileEditForm from '@/components/profile/ProfileEditForm.vue'
 import ProfilePasswordForm from '@/components/profile/ProfilePasswordForm.vue'
 import LearningRecords from '@/components/profile/LearningRecords.vue'
@@ -103,8 +155,11 @@ import { User, Lock, Clock, Coin, Trophy, ArrowRight, SwitchButton } from '@elem
 
 const router = useRouter()
 const userStore = useUserStore()
+const scoreStore = useScoreStore()
+const profileStore = useProfileStore()
 const userInfo = ref(userStore.userInfo)
 const activeTab = ref('info')
+const profileInfo = computed(() => profileStore.profileInfo)
 
 const userStats = ref({
   score: 0,
@@ -125,23 +180,18 @@ function handleNavClick(item: { key: string }) {
 }
 
 const fetchUserStats = async () => {
-  try {
-    const { get } = await import('@/utils/request')
-    const [scoreRes, progressRes] = await Promise.all([
-      get<any>('/score/info'),
-      get<any>('/challenge/progress')
-    ])
-    userStats.value = {
-      score: scoreRes.totalScore || 0,
-      achievement: scoreRes.unlockedAchievements || 0,
-      challenge: progressRes.completedChallenges || 0
-    }
-  } catch {
-    userStats.value = {
-      score: 156,
-      achievement: 3,
-      challenge: 5
-    }
+  const [scoreResult, progressResult] = await Promise.allSettled([
+    scoreStore.fetchScoreInfo(),
+    getChallengeProgress()
+  ])
+
+  const scoreInfo = scoreResult.status === 'fulfilled' ? scoreResult.value : scoreStore.scoreInfo
+  const progress = progressResult.status === 'fulfilled' ? progressResult.value : null
+
+  userStats.value = {
+    score: scoreInfo?.totalScore || 0,
+    achievement: scoreInfo?.unlockedAchievements || 0,
+    challenge: progress?.completedChallenges || 0
   }
 }
 
@@ -179,7 +229,7 @@ const handleLogout = async () => {
 onMounted(async () => {
   await userStore.getUserInfo()
   userInfo.value = userStore.userInfo
-  await fetchUserStats()
+  await Promise.allSettled([fetchUserStats(), profileStore.fetchProfileInfo()])
 })
 
 watch(() => userStore.userInfo, (newInfo) => {
@@ -355,6 +405,64 @@ watch(() => userStore.userInfo, (newInfo) => {
   }
 }
 
+.profile-insights {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 28px;
+  padding: 18px;
+  border-radius: 12px;
+  border: 1px solid hsl(220, 12%, 90%);
+  background: linear-gradient(180deg, hsla(0, 0%, 100%, 0.95), hsla(220, 18%, 98%, 0.95));
+
+  &__metric,
+  &__tags {
+    min-width: 0;
+    padding: 14px;
+    border-radius: 10px;
+    background: hsla(0, 0%, 100%, 0.72);
+    border: 1px solid hsl(220, 12%, 92%);
+  }
+
+  &__label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: hsl(220, 8%, 48%);
+  }
+
+  &__value {
+    display: block;
+    margin-bottom: 10px;
+    font-size: 17px;
+    color: hsl(220, 12%, 18%);
+  }
+
+  &__sub {
+    font-size: 13px;
+    color: hsl(220, 8%, 50%);
+  }
+
+  &__tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  &__empty {
+    font-size: 13px;
+    color: hsl(220, 8%, 60%);
+  }
+
+  :deep(.el-progress-bar__outer) {
+    background-color: hsl(220, 12%, 90%);
+  }
+
+  :deep(.el-progress-bar__inner) {
+    background: linear-gradient(90deg, hsl(220, 18%, 18%), hsl(220, 8%, 42%));
+  }
+}
+
 .profile-quick-links {
   display: flex;
   flex-direction: column;
@@ -451,6 +559,10 @@ watch(() => userStore.userInfo, (newInfo) => {
         white-space: nowrap;
       }
     }
+  }
+
+  .profile-insights {
+    grid-template-columns: 1fr;
   }
 }
 

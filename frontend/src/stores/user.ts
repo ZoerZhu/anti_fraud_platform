@@ -3,6 +3,15 @@ import { ref, computed } from 'vue'
 import type { UserInfo } from '@/types/global'
 import { get, post, put } from '@/utils/request'
 
+interface LoginPayload {
+  token: string
+  userId: number
+  username: string
+  nickname?: string
+  avatar?: string
+  role: UserInfo['role']
+}
+
 export const useUserStore = defineStore('user', () => {
   const token = ref<string | null>(localStorage.getItem('token'))
   const userInfo = ref<UserInfo | null>(null)
@@ -11,19 +20,18 @@ export const useUserStore = defineStore('user', () => {
   const isAdmin = computed(() => userInfo.value?.role === 'admin')
 
   async function login(username: string, password: string) {
-    const res: any = await post<{ token: string; userId: number; username: string; nickname: string; avatar: string; role: string }>('/user/login', {
+    const res = await post<LoginPayload>('/user/login', {
       username,
       password
     })
     token.value = res.token
-    userInfo.value = {
-      id: res.userId,
-      username: res.username,
-      nickname: res.nickname,
-      avatar: res.avatar,
-      role: res.role
-    }
     localStorage.setItem('token', res.token)
+
+    const latestUser = await getUserInfo()
+    if (!latestUser) {
+      clearUser()
+      throw new Error('登录状态初始化失败，请重新登录')
+    }
     return res
   }
 
@@ -37,14 +45,14 @@ export const useUserStore = defineStore('user', () => {
     grade?: string
     major?: string
   }) {
-    const res = await post<any>('/user/register', data)
+    const res = await post<UserInfo>('/user/register', data)
     return res
   }
 
   async function getUserInfo() {
     if (!token.value) return null
     try {
-      const res = await get<any>('/user/info')
+      const res = await get<UserInfo>('/user/info')
       userInfo.value = res
       return res
     } catch (error) {
@@ -61,13 +69,13 @@ export const useUserStore = defineStore('user', () => {
     grade?: string
     major?: string
   }) {
-    const res = await put<any>('/user/update', data)
+    const res = await put<void>('/user/update', data)
     await getUserInfo()
     return res
   }
 
   async function changePassword(oldPassword: string, newPassword: string) {
-    const res = await put<any>('/user/password', {
+    const res = await put<void>('/user/password', {
       oldPassword,
       newPassword
     })
