@@ -26,12 +26,7 @@ export const useUserStore = defineStore('user', () => {
     })
     token.value = res.token
     localStorage.setItem('token', res.token)
-
-    const latestUser = await getUserInfo()
-    if (!latestUser) {
-      clearUser()
-      throw new Error('登录状态初始化失败，请重新登录')
-    }
+    userInfo.value = buildUserInfoFromLogin(res)
     return res
   }
 
@@ -50,6 +45,9 @@ export const useUserStore = defineStore('user', () => {
   }
 
   async function getUserInfo() {
+    if (!token.value) {
+      token.value = localStorage.getItem('token')
+    }
     if (!token.value) return null
     try {
       const res = await get<UserInfo>('/user/info')
@@ -98,6 +96,18 @@ export const useUserStore = defineStore('user', () => {
 
   function setUserInfo(info: UserInfo) {
     userInfo.value = info
+  }
+
+  function buildUserInfoFromLogin(payload: LoginPayload): UserInfo {
+    return {
+      id: payload.userId,
+      username: payload.username,
+      nickname: payload.nickname,
+      avatar: payload.avatar,
+      role: payload.role,
+      status: 1,
+      createTime: ''
+    }
   }
 
   return {
